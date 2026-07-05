@@ -1,0 +1,10 @@
+*.log
+*.jsonl
+*.db
+*.db3
+*.db3-shm
+*.db3-wal
+.env
+auth.json
+wallets.json
+session.json
