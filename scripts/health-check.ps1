@@ -1,5 +1,27 @@
 $ErrorActionPreference = "Stop"
 
+$requiredPaths = @(
+    (Join-Path $env:USERPROFILE ".local\bin"),
+    (Join-Path $env:ProgramFiles "nodejs"),
+    (Join-Path $env:APPDATA "npm")
+)
+$env:Path = (($requiredPaths + $env:Path) | Where-Object { $_ }) -join ";"
+
+$codexCommand = [Environment]::GetEnvironmentVariable(
+    "OKX_A2A_AI_CODEX_COMMAND",
+    "User"
+)
+$realCodexCommand = [Environment]::GetEnvironmentVariable(
+    "OKX_A2A_REAL_CODEX_COMMAND",
+    "User"
+)
+if ($codexCommand) {
+    $env:OKX_A2A_AI_CODEX_COMMAND = $codexCommand
+}
+if ($realCodexCommand) {
+    $env:OKX_A2A_REAL_CODEX_COMMAND = $realCodexCommand
+}
+
 Write-Host "== Runtime =="
 node --version
 npm --version
@@ -15,10 +37,6 @@ if (Test-Path -LiteralPath $launcher) {
 }
 
 Write-Host "`n== Dedicated Codex command =="
-$codexCommand = [Environment]::GetEnvironmentVariable(
-    "OKX_A2A_AI_CODEX_COMMAND",
-    "User"
-)
 if ($codexCommand -and (Test-Path -LiteralPath $codexCommand)) {
     Write-Host "OK: $codexCommand"
 } else {
