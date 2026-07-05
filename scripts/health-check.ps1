@@ -32,6 +32,22 @@ if (Test-Path -LiteralPath (Join-Path $codexHome "config.toml")) {
     Write-Warning "Isolated CODEX_HOME configuration is missing."
 }
 
+$taskSkill = Join-Path $env:USERPROFILE ".agents\skills\okx-agent-task\SKILL.md"
+if ((Test-Path -LiteralPath $taskSkill) -and
+    (Select-String -LiteralPath $taskSkill -Pattern "Inbound daemon sub-session skip" -Quiet)) {
+    Write-Host "OK: inbound task preflight skip is present."
+} else {
+    Write-Warning "Inbound task preflight skip is missing; an update may have overwritten the local safeguard."
+}
+
+$guardBin = Join-Path $env:USERPROFILE ".okx-agent-task\guard-bin"
+if ((Test-Path -LiteralPath (Join-Path $guardBin "okx-a2a.cmd")) -and
+    (Test-Path -LiteralPath (Join-Path $guardBin "npm.cmd"))) {
+    Write-Host "OK: inbound maintenance command guards exist."
+} else {
+    Write-Warning "Inbound maintenance command guards are missing."
+}
+
 Write-Host "`n== Daemon =="
 okx-a2a daemon status
 

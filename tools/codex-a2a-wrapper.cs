@@ -47,6 +47,9 @@ internal static class Program
         };
         startInfo.EnvironmentVariables["CODEX_HOME"] = codexHome;
         startInfo.EnvironmentVariables["CODEX_SQLITE_HOME"] = sqliteHome;
+        string guardBin = Path.Combine(userProfile, ".okx-agent-task", "guard-bin");
+        string currentPath = startInfo.EnvironmentVariables["PATH"] ?? string.Empty;
+        startInfo.EnvironmentVariables["PATH"] = guardBin + Path.PathSeparator + currentPath;
 
         using (Process process = Process.Start(startInfo))
         {
