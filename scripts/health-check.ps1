@@ -14,6 +14,24 @@ if (Test-Path -LiteralPath $launcher) {
     Write-Host "Run: okx-a2a doctor --fix"
 }
 
+Write-Host "`n== Dedicated Codex command =="
+$codexCommand = [Environment]::GetEnvironmentVariable(
+    "OKX_A2A_AI_CODEX_COMMAND",
+    "User"
+)
+if ($codexCommand -and (Test-Path -LiteralPath $codexCommand)) {
+    Write-Host "OK: $codexCommand"
+} else {
+    Write-Warning "A dedicated A2A Codex command is not configured or is missing."
+}
+
+$codexHome = Join-Path $env:USERPROFILE ".okx-agent-task\codex-home"
+if (Test-Path -LiteralPath (Join-Path $codexHome "config.toml")) {
+    Write-Host "OK: isolated CODEX_HOME configuration exists."
+} else {
+    Write-Warning "Isolated CODEX_HOME configuration is missing."
+}
+
 Write-Host "`n== Daemon =="
 okx-a2a daemon status
 

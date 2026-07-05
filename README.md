@@ -36,6 +36,8 @@ Windows 上运行 OKX A2A Agent 时，可能出现“守护进程在线、心跳
    - 测试报价可能低于登记服务费。
    - Agent 按正常业务规则拒绝任务，但审核系统可能将其判定为功能验证失败。
 
+后续复盘确认，平台的边界测试可能就是故意制造“能力不匹配”和“报价低于登记费”的场景。此时拒绝本身是正确行为，真正影响审核的是作出拒绝决定和发送回调所需的总时间。
+
 ## 修复步骤
 
 ### 1. 更新并检查运行环境
@@ -76,18 +78,65 @@ onchainos agent user-notify --content "A2A notification self-test"
 okx-a2a doctor --fix
 ```
 
-### 4. 为后台 Codex 使用精简参数
+### 4. 为后台 Codex 使用隔离运行环境
 
-不要直接降低日常 Codex 会话的配置。仅为 A2A 守护进程设置独立参数：
+不要直接降低日常 Codex 会话的配置。为 A2A 守护进程准备独立 `CODEX_HOME`：
 
 - 使用适合自动化的较小模型和低推理等级。
-- 加入 `--ignore-user-config`，避免加载无关个人配置和插件。
-- 加入 `--ignore-rules`，避免加载与审核任务无关的执行规则。
+- 只启用 `okx-agent-task`，禁用与任务处理无关的技能。
+- 不安装个人插件或无关 MCP 服务。
 - 保留必要的工作目录、沙箱和授权策略。
+- 使用 `OKX_A2A_AI_CODEX_COMMAND` 指向专用启动器，由启动器仅对子进程设置 `CODEX_HOME`。
 
-本次精简后，代表性冷启动耗时由 68 至 134 秒降低到约 17.5 秒。
+`@okxweb3/a2a-node` 版本行为可能变化。实测 `0.1.5` 的守护进程任务路径没有采用早期配置中的自定义参数模板，因此仅设置额外参数环境变量并不足以证明优化已生效。应以实际审核会话日志为准，检查是否仍加载个人插件及大量无关技能。
+
+仓库提供了 [`tools/codex-a2a-wrapper.cs`](tools/codex-a2a-wrapper.cs) 示例。它只设置隔离目录、定位官方 `codex.exe` 并原样转发参数，不修改任务内容或扩大权限。
 
 > 参数模板应按当前 `okx-a2a` 版本的环境变量约定配置。升级后先运行 `okx-a2a doctor` 和 `okx-a2a setup --json`，不要盲目复制旧模板。
+
+### 5. 固定 Windows JSON 调用方式
+
+审核事件中可能包含引号、反斜杠、反引号和中文。不要把完整事件 JSON 直接拼接进 PowerShell 命令行，也不要连续尝试不同转义方式。
+
+推荐做法：
+
+1. 保留收到的完整事件对象。
+2. 将 JSON 放入环境变量或 UTF-8 临时文件。
+3. 用 Node.js `spawnSync` 参数数组调用 `onchainos`。
+4. 设置 `shell: false`，把完整 JSON 作为单个 argv 值传递。
+5. 第一次失败后停止并记录原始错误，不进行多轮转义猜测。
+
+```javascript
+import { spawnSync } from "node:child_process";
+
+const result = spawnSync(
+  "onchainos",
+  [
+    "agent",
+    "next-action",
+    "--role",
+    "auto",
+    "--agentId",
+    process.env.AGENT_ID,
+    "--message",
+    process.env.EVENT_JSON,
+  ],
+  { stdio: "inherit", shell: false },
+);
+
+process.exit(result.status ?? 1);
+```
+
+### 6. 提交审核前检查 Codex 额度
+
+通信在线不代表模型仍可调用。额度耗尽时，Codex 会立即返回 usage limit 错误，审核仍会被判断为无法响应。
+
+提交审核前应运行一次隔离环境的最小 `codex exec` 测试，并确认：
+
+- 没有 usage limit 或认证错误。
+- 没有加载个人插件的启动日志。
+- 总耗时符合审核要求。
+- 测试结束后守护进程仍为 `activeClients=1`。
 
 ## 日志定位
 
@@ -124,7 +173,8 @@ Select-String -Path "$env:USERPROFILE\.okx-agent-task\logs\listener.log" `
 4. 检查 `next-action` 是否出现 JSON 错误。
 5. 检查 Codex 会话总耗时和 token 数量。
 6. 检查 `user-notify` 是否能找到原生启动器。
-7. 最后再检查 VPN、TUN、系统休眠和网络出口。
+7. 检查 Codex 认证和剩余额度。
+8. 最后再检查 VPN、TUN、系统休眠和网络出口。
 
 不要看到“未及时响应”就立刻重装 VPN。先用日志区分：未收到、处理过慢、业务拒绝、回调失败。
 
