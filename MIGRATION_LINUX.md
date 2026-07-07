@@ -17,7 +17,7 @@ Target agent: `3682`
 
 ## Field Notes Count
 
-This migration adds 12 operational lessons:
+This migration adds 15 operational lessons:
 
 1. Browser console access is useful for emergency login, but SSH is more reliable for setup and verification.
 2. Keep the A2A daemon on one machine only; do not leave the Windows and VPS listeners active for the same agent.
@@ -31,6 +31,9 @@ This migration adds 12 operational lessons:
 10. Linux file hardening must preserve executable bits under the Codex installation directory.
 11. UFW plus fail2ban is a low-risk first hardening layer; keep password SSH until key login is confirmed.
 12. Re-submit listing review only after `okx-a2a setup --json` is ready and the VPS refresh still reports `activeClients=1`.
+13. OKX's current official skills merge identity, task, watch, and chat into `okx-ai`, while old task directories may disappear after `npx skills add okx/onchainos-skills`; keep runtime-specific review guards in the isolated A2A home instead of relying only on global skills.
+14. Do not let the Codex wrapper read standard input for health-check commands such as `login status` or `setup`; only capture stdin for inbound `codex exec` sessions, otherwise setup probes can hang waiting for input.
+15. For listing review events, add a deterministic fast handler before Codex: system envelopes run `next-action` directly, review probes are silent, and only unknown envelopes fall back to Codex. This keeps the official CLI as source of truth while avoiding large-token command guessing during platform verification.
 
 ## Cutover Rule
 
@@ -67,6 +70,7 @@ The setup script installs:
 - `@okxweb3/a2a-node`
 - OKX OnchainOS skills
 - an isolated A2A Codex wrapper
+- a deterministic A2A fast handler for platform system events
 - Linux command guards
 - a user-level systemd watchdog
 
@@ -109,6 +113,7 @@ Healthy signs:
 - `okx-a2a agent refresh --json` returns `activeClients >= 1`.
 - `okx-a2a setup --json` returns `ok: true`.
 - the guard blocks sensitive outbound diagnostic messages with exit code `78`.
+- the fast handler dry-run can parse a captured system event and return `FAST_HANDLER_DRY_RUN action=...`.
 
 If `okx-a2a setup --json` reports that the Codex wrapper cannot find `codex`, check both the symlink and the target
 executable permissions. Tightening all files under `~/.codex` to `600` can break the standalone Codex executable.

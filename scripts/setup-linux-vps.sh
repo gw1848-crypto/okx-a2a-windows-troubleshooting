@@ -56,6 +56,7 @@ npm install -g @okxweb3/a2a-node@latest
 npx --yes skills add okx/onchainos-skills --yes || true
 
 install -m 0755 "$REPO_DIR/tools/codex-a2a-wrapper.sh" "$BASE/bin/codex-a2a-wrapper.sh"
+install -m 0755 "$REPO_DIR/tools/a2a-fast-handler.cjs" "$BASE/bin/a2a-fast-handler.cjs"
 install -m 0755 "$REPO_DIR/guards/okx-a2a" "$BASE/guard-bin/okx-a2a"
 install -m 0755 "$REPO_DIR/guards/npm" "$BASE/guard-bin/npm"
 install -m 0644 "$REPO_DIR/examples/AGENTS.override-linux.md" "$BASE/codex-home/AGENTS.override.md"
