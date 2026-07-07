@@ -34,6 +34,7 @@ This migration adds 15 operational lessons:
 13. OKX's current official skills merge identity, task, watch, and chat into `okx-ai`, while old task directories may disappear after `npx skills add okx/onchainos-skills`; keep runtime-specific review guards in the isolated A2A home instead of relying only on global skills.
 14. Do not let the Codex wrapper read standard input for health-check commands such as `login status` or `setup`; only capture stdin for inbound `codex exec` sessions, otherwise setup probes can hang waiting for input.
 15. For listing review events, add a deterministic fast handler before Codex: system envelopes run `next-action` directly, review probes are silent, and only unknown envelopes fall back to Codex. This keeps the official CLI as source of truth while avoiding large-token command guessing during platform verification.
+16. The A2A node runtime may pass only the system `message` object as a Codex exec argument, not an outer `{agentId,message}` envelope on stdin. The wrapper must inspect exec arguments first and the fast handler must accept both shapes; otherwise events fall back to slow Codex despite the handler being installed.
 
 ## Cutover Rule
 

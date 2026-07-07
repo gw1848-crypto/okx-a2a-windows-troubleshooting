@@ -125,13 +125,24 @@ if (envelope.msgType === 'a2a-agent-chat' && typeof envelope.content === 'string
   process.exit(64);
 }
 
-if (!envelope.agentId || !envelope.message || envelope.message.source !== 'system' || !envelope.message.event || !envelope.message.jobId) {
+let systemMessage = null;
+let agentId = null;
+
+if (envelope.message && envelope.message.source === 'system' && envelope.message.event && envelope.message.jobId) {
+  systemMessage = envelope.message;
+  agentId = envelope.agentId || envelope.message.providerAgentId || envelope.message.agentId;
+} else if (envelope.source === 'system' && envelope.event && envelope.jobId) {
+  systemMessage = envelope;
+  agentId = envelope.agentId || envelope.providerAgentId;
+}
+
+if (!systemMessage || !agentId) {
   process.exit(64);
 }
 
-const agentId = String(envelope.agentId);
-const jobId = String(envelope.message.jobId);
-log(`system_event start agent=${agentId} job=${jobId} event=${envelope.message.event}`);
+agentId = String(agentId);
+const jobId = String(systemMessage.jobId);
+log(`system_event start agent=${agentId} job=${jobId} event=${systemMessage.event}`);
 
 const next = run('onchainos', [
   'agent',
@@ -141,7 +152,7 @@ const next = run('onchainos', [
   '--role',
   'auto',
   '--message',
-  JSON.stringify(envelope.message),
+  JSON.stringify(systemMessage),
 ]);
 
 if (next.status !== 0) {

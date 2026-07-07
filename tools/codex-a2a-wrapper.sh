@@ -21,21 +21,34 @@ if [ -z "$REAL_CODEX" ] || [ ! -x "$REAL_CODEX" ]; then
   exit 127
 fi
 
-STDIN_FILE=""
-if [ "${1:-}" = "exec" ] && [ ! -t 0 ]; then
-  STDIN_FILE="$(mktemp "$BASE/run/a2a-stdin.XXXXXX")"
-  cat > "$STDIN_FILE"
-  if [ -s "$STDIN_FILE" ] && [ -x "$BASE/bin/a2a-fast-handler.cjs" ]; then
-    set +e
-    node "$BASE/bin/a2a-fast-handler.cjs" "$@" < "$STDIN_FILE"
-    FAST_STATUS=$?
-    set -e
-    if [ "$FAST_STATUS" -eq 0 ]; then
-      rm -f "$STDIN_FILE"
-      exit 0
-    fi
+if [ "${1:-}" = "exec" ] && [ -x "$BASE/bin/a2a-fast-handler.cjs" ]; then
+  # The daemon may pass the inbound envelope either as exec arguments or via stdin.
+  # Inspect arguments first without consuming stdin; this is the common node runtime path.
+  set +e
+  node "$BASE/bin/a2a-fast-handler.cjs" "$@" </dev/null
+  FAST_ARG_STATUS=$?
+  set -e
+  if [ "$FAST_ARG_STATUS" -eq 0 ]; then
+    exit 0
   fi
-  exec "$REAL_CODEX" "$@" < "$STDIN_FILE"
+
+  if [ ! -t 0 ]; then
+    STDIN_FILE="$(mktemp "$BASE/run/a2a-stdin.XXXXXX")"
+    # Stdin is normally delivered immediately by okx-a2a; timeout prevents health probes from hanging.
+    timeout 2s cat > "$STDIN_FILE" || true
+    if [ -s "$STDIN_FILE" ]; then
+      set +e
+      node "$BASE/bin/a2a-fast-handler.cjs" "$@" < "$STDIN_FILE"
+      FAST_STDIN_STATUS=$?
+      set -e
+      if [ "$FAST_STDIN_STATUS" -eq 0 ]; then
+        rm -f "$STDIN_FILE"
+        exit 0
+      fi
+      exec "$REAL_CODEX" "$@" < "$STDIN_FILE"
+    fi
+    rm -f "$STDIN_FILE"
+  fi
 fi
 
 exec "$REAL_CODEX" "$@"
