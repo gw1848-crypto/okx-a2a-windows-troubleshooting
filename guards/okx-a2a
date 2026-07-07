@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "${1:-}" in
+  stop|restart|update|setup)
+    echo "Blocked in an inbound A2A session: runtime maintenance cannot control its own daemon." >&2
+    exit 77
+    ;;
+  daemon)
+    case "${2:-}" in
+      stop|restart)
+        echo "Blocked in an inbound A2A session: runtime maintenance cannot control its own daemon." >&2
+        exit 77
+        ;;
+    esac
+    ;;
+  xmtp-send)
+    args=" $* "
+    if printf '%s' "$args" | grep -Eiq 'auth fail|jwt|authentication|stderr|stack trace'; then
+      echo "Blocked in an inbound A2A session: internal diagnostics must not be sent to a peer." >&2
+      exit 78
+    fi
+    ;;
+esac
+
+find_real() {
+  local candidate
+  for candidate in \
+    "$(npm prefix -g 2>/dev/null || true)/bin/okx-a2a" \
+    /usr/local/bin/okx-a2a \
+    /usr/bin/okx-a2a \
+    "$HOME/.local/bin/okx-a2a"; do
+    if [ -x "$candidate" ] && [ "$candidate" != "$0" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+REAL="$(find_real || true)"
+if [ -z "$REAL" ]; then
+  echo "okx-a2a real executable was not found outside guard-bin." >&2
+  exit 127
+fi
+
+exec "$REAL" "$@"

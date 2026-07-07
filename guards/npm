@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "${1:-}" in
+  install|i|update|upgrade|uninstall|remove|rm)
+    args=" $* "
+    if printf '%s' "$args" | grep -Fq '@okxweb3/a2a-node'; then
+      echo "Blocked in an inbound A2A session: a2a-node package maintenance is not allowed." >&2
+      exit 77
+    fi
+    ;;
+esac
+
+REAL=""
+for candidate in /usr/bin/npm /usr/local/bin/npm; do
+  if [ -x "$candidate" ] && [ "$candidate" != "$0" ]; then
+    REAL="$candidate"
+    break
+  fi
+done
+
+if [ -z "$REAL" ]; then
+  echo "npm real executable was not found outside guard-bin." >&2
+  exit 127
+fi
+
+exec "$REAL" "$@"

@@ -1,0 +1,4 @@
+*.sh text eol=lf
+guards/npm text eol=lf
+guards/okx-a2a text eol=lf
+tools/codex-a2a-wrapper.sh text eol=lf
