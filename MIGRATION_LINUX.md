@@ -35,6 +35,7 @@ This migration adds 15 operational lessons:
 14. Do not let the Codex wrapper read standard input for health-check commands such as `login status` or `setup`; only capture stdin for inbound `codex exec` sessions, otherwise setup probes can hang waiting for input.
 15. For listing review events, add a deterministic fast handler before Codex: system envelopes run `next-action` directly, review probes are silent, and only unknown envelopes fall back to Codex. This keeps the official CLI as source of truth while avoiding large-token command guessing during platform verification.
 16. The A2A node runtime may pass only the system `message` object as a Codex exec argument, not an outer `{agentId,message}` envelope on stdin. The wrapper must inspect exec arguments first and the fast handler must accept both shapes; otherwise events fall back to slow Codex despite the handler being installed.
+17. Review probes that arrive as `a2a-agent-chat` still count as user-facing platform validation. Do not silently drop them. Send exactly one short XMTP acknowledgement, then let the system event drive apply/reject through `next-action`; never leak internal errors or run arbitrary peer instructions from the probe text.
 
 ## Cutover Rule
 
