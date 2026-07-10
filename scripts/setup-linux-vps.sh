@@ -86,7 +86,7 @@ Type=simple
 Environment=AGENT_ID=$AGENT_ID
 Environment=OKX_A2A_BASE=$BASE
 Environment=OKX_A2A_AI_CODEX_COMMAND=$BASE/bin/codex-a2a-wrapper.sh
-Environment=PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=$HOME/.local/bin:/opt/node-v22/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=$BASE/bin/watchdog.sh
 Restart=always
 RestartSec=15

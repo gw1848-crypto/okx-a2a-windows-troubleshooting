@@ -14,7 +14,7 @@ LOG="$LOG_DIR/watchdog.log"
 mkdir -p "$LOG_DIR"
 
 export OKX_A2A_AI_CODEX_COMMAND="${OKX_A2A_AI_CODEX_COMMAND:-$BASE/bin/codex-a2a-wrapper.sh}"
-export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+export PATH="$HOME/.local/bin:/opt/node-v22/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 fail_count=0
 
@@ -23,16 +23,16 @@ log() {
 }
 
 ensure_daemon() {
-  if okx-a2a daemon status >/tmp/okx-a2a-daemon-status.out 2>&1; then
+  if timeout 15s okx-a2a daemon status >/tmp/okx-a2a-daemon-status.out 2>&1; then
     return 0
   fi
 
   log "daemon not running, starting"
-  okx-a2a daemon start >>"$LOG" 2>&1 || return 1
+  timeout 30s okx-a2a daemon start >>"$LOG" 2>&1 || return 1
 }
 
 check_active_client() {
-  if ! okx-a2a agent refresh --json >/tmp/okx-a2a-agent-refresh.json 2>>"$LOG"; then
+  if ! timeout 45s okx-a2a agent refresh --json >/tmp/okx-a2a-agent-refresh.json 2>>"$LOG"; then
     return 1
   fi
 
@@ -51,7 +51,7 @@ while true; do
     log "active client check failed count=$fail_count"
     if [ "$fail_count" -ge 2 ]; then
       log "restarting daemon after repeated failures"
-      okx-a2a daemon restart >>"$LOG" 2>&1 || okx-a2a daemon start >>"$LOG" 2>&1 || true
+      timeout 30s okx-a2a daemon restart >>"$LOG" 2>&1 || timeout 30s okx-a2a daemon start >>"$LOG" 2>&1 || true
       fail_count=0
     fi
   fi

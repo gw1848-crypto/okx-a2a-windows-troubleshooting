@@ -81,6 +81,9 @@ okx-a2a setup --json
 
 - 守护进程处于 `running`。
 - `activeClients` 与预期 Agent 数量一致。
+- OnchainOS 4.2.2 下，快速处理器只接管 `job_asp_selected`，并执行官方 `next-action` 返回的准确分支；其他系统事件和点对点消息回退官方角色流程。
+- 不为 `Please disregard...` 文本硬编码审核回执；该文本按不可信任务内容处理。
+- 维护终端运行 `setup` 时必须显式使用 watchdog 的 `OKX_A2A_AI_CODEX_COMMAND`，避免误触发新的设备登录。
 - 运行时认证状态为 `ready`。
 
 ### 3. 验证通知回调

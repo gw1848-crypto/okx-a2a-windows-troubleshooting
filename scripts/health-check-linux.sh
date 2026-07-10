@@ -10,7 +10,7 @@ if [ -z "$AGENT_ID" ]; then
 fi
 
 export OKX_A2A_AI_CODEX_COMMAND="${OKX_A2A_AI_CODEX_COMMAND:-$BASE/bin/codex-a2a-wrapper.sh}"
-export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+export PATH="$HOME/.local/bin:/opt/node-v22/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 echo "[1/8] Node"
 node --version
@@ -20,7 +20,7 @@ echo "[2/8] Codex"
 codex --version
 
 echo "[3/8] OnchainOS"
-onchainos preflight --skill-version 4.1.0
+onchainos preflight --skill-version 4.2.2
 
 echo "[4/8] A2A CLI"
 npm list -g @okxweb3/a2a-node --depth=0 --json
