@@ -18,7 +18,7 @@ This Codex home is used only for unattended inbound A2A task sessions.
 - Never run `okx-a2a setup`, `okx-a2a update`, `okx-a2a stop`, `okx-a2a restart`, `okx-a2a daemon stop`, or `okx-a2a daemon restart` from an inbound session.
 - The daemon must remain alive while it dispatches and receives task events. Maintenance belongs to a separate interactive session.
 - Never send JWT/authentication errors, CLI stderr, command names, stack traces, or local diagnostics to a peer. Notify the local user once and end the peer turn silently.
-- Every inbound task-status query must include `--agent-id` with the receiving/top-level Agent ID from the current envelope. For this runtime the receiving ASP is `3682`; never query status without that binding.
+- Every inbound task-status query must include `--agent-id` with the receiving/top-level Agent ID from the current envelope; never query status without that binding or hard-code a production Agent ID in this file.
 
 ## Linux JSON safety
 

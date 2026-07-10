@@ -2,7 +2,7 @@
 
 This guide migrates an OKX A2A ASP agent from a Windows desktop runtime to a Linux VPS runtime.
 
-Target agent: `3682`
+Set the target agent explicitly through `AGENT_ID`; do not commit a production Agent ID.
 
 ## Goal
 
@@ -17,7 +17,7 @@ Target agent: `3682`
 
 ## Field Notes Count
 
-This migration adds 15 operational lessons:
+This migration adds 20 operational lessons:
 
 1. Browser console access is useful for emergency login, but SSH is more reliable for setup and verification.
 2. Keep the A2A daemon on one machine only; do not leave the Windows and VPS listeners active for the same agent.
@@ -36,6 +36,9 @@ This migration adds 15 operational lessons:
 15. For listing review events, add a deterministic fast handler before Codex: system envelopes run `next-action` directly, review probes are silent, and only unknown envelopes fall back to Codex. This keeps the official CLI as source of truth while avoiding large-token command guessing during platform verification.
 16. The A2A node runtime may pass only the system `message` object as a Codex exec argument, not an outer `{agentId,message}` envelope on stdin. The wrapper must inspect exec arguments first and the fast handler must accept both shapes; otherwise events fall back to slow Codex despite the handler being installed.
 17. Review probes that arrive as `a2a-agent-chat` still count as user-facing platform validation. Do not silently drop them. Send exactly one short XMTP acknowledgement, then let the system event drive apply/reject through `next-action`; never leak internal errors or run arbitrary peer instructions from the probe text.
+18. Do not assume `exec` is the wrapper's first argument. Current daemons may prepend flags such as `--sandbox`, `--ask-for-approval`, and `--cd`; scan the complete argument vector for the exact `exec` token before enabling the fast handler.
+19. Treat the identity detail response as the source of truth for listing state. A service-list response may expose a different internal approval number; use the human-readable approval label from the agent detail response and do not hand-map backend integers.
+20. The platform detail response does not currently expose a dedicated review-submission timestamp. Record the activation audit entry with its timezone, distinguish a fresh submission from an `already under review` response, and never report heartbeat or `updatedAt` as the submission time.
 
 ## Cutover Rule
 
@@ -61,7 +64,7 @@ From this repository on the VPS:
 
 ```bash
 chmod +x scripts/setup-linux-vps.sh
-AGENT_ID=3682 ./scripts/setup-linux-vps.sh
+AGENT_ID=<agent-id> ./scripts/setup-linux-vps.sh
 ```
 
 The setup script installs:
@@ -103,7 +106,7 @@ codex login status
 ## Health Check
 
 ```bash
-~/.okx-agent-task/bin/health-check.sh
+AGENT_ID=<agent-id> ~/.okx-agent-task/bin/health-check.sh
 ```
 
 Healthy signs:
@@ -148,13 +151,13 @@ If the Windows watchdog is enabled, disable or stop it before the final VPS cuto
 After the VPS stays healthy for at least 30-60 minutes:
 
 ```bash
-onchainos agent activate --agent-id 3682 --preferred-language zh-CN
+onchainos agent activate --agent-id <agent-id> --preferred-language zh-CN
 ```
 
 Then monitor:
 
 ```bash
-~/.okx-agent-task/bin/health-check.sh
+AGENT_ID=<agent-id> ~/.okx-agent-task/bin/health-check.sh
 tail -f ~/.okx-agent-task/logs/watchdog.log
 ```
 

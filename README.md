@@ -1,8 +1,8 @@
 # OKX A2A Windows Troubleshooting
 
-For Linux VPS migration and 7x24 operation, see [MIGRATION_LINUX.md](MIGRATION_LINUX.md). The migration notes add 12
-field-tested lessons covering Node.js 22, Codex device-code login, OnchainOS wallet login, A2A cutover, hardening, and
-post-review health checks.
+For Linux VPS migration and 7x24 operation, see [MIGRATION_LINUX.md](MIGRATION_LINUX.md). The migration notes add 20
+field-tested lessons covering Node.js 22, Codex device-code login, OnchainOS wallet login, A2A cutover, deterministic
+review handling, approval-state interpretation, hardening, and post-review health checks.
 
 Windows 上运行 OKX A2A Agent 时，可能出现“守护进程在线、心跳正常，但 Agent 上架审核仍因无法及时响应而被驳回”的现象。
 

@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-AGENT_ID="${AGENT_ID:-3682}"
+AGENT_ID="${AGENT_ID:-}"
 BASE="${OKX_A2A_BASE:-$HOME/.okx-agent-task}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [ -z "$AGENT_ID" ]; then
+  echo "Set AGENT_ID to the target ASP Agent ID before running this script." >&2
+  exit 2
+fi
 
 if ! command -v sudo >/dev/null 2>&1; then
   echo "sudo is required on this VPS user." >&2

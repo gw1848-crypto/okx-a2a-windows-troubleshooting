@@ -21,7 +21,15 @@ if [ -z "$REAL_CODEX" ] || [ ! -x "$REAL_CODEX" ]; then
   exit 127
 fi
 
-if [ "${1:-}" = "exec" ] && [ -x "$BASE/bin/a2a-fast-handler.cjs" ]; then
+IS_CODEX_EXEC=false
+for arg in "$@"; do
+  if [ "$arg" = "exec" ]; then
+    IS_CODEX_EXEC=true
+    break
+  fi
+done
+
+if [ "$IS_CODEX_EXEC" = "true" ] && [ -x "$BASE/bin/a2a-fast-handler.cjs" ]; then
   # The daemon may pass the inbound envelope either as exec arguments or via stdin.
   # Inspect arguments first without consuming stdin; this is the common node runtime path.
   set +e

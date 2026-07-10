@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-AGENT_ID="${AGENT_ID:-3682}"
+AGENT_ID="${AGENT_ID:-}"
 BASE="${OKX_A2A_BASE:-$HOME/.okx-agent-task}"
+
+if [ -z "$AGENT_ID" ]; then
+  echo "Set AGENT_ID before starting the watchdog." >&2
+  exit 2
+fi
 LOG_DIR="$BASE/logs"
 LOG="$LOG_DIR/watchdog.log"
 

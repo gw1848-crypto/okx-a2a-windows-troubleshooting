@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-AGENT_ID="${AGENT_ID:-3682}"
+AGENT_ID="${AGENT_ID:-}"
 BASE="${OKX_A2A_BASE:-$HOME/.okx-agent-task}"
+
+if [ -z "$AGENT_ID" ]; then
+  echo "Set AGENT_ID before running the health check." >&2
+  exit 2
+fi
 
 export OKX_A2A_AI_CODEX_COMMAND="${OKX_A2A_AI_CODEX_COMMAND:-$BASE/bin/codex-a2a-wrapper.sh}"
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
