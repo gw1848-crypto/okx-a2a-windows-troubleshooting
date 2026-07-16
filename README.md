@@ -1,8 +1,31 @@
 # OKX A2A Windows Troubleshooting
 
-For Linux VPS migration and 7x24 operation, see [MIGRATION_LINUX.md](MIGRATION_LINUX.md). The migration notes add 20
+For Linux VPS migration and 7x24 operation, see [MIGRATION_LINUX.md](MIGRATION_LINUX.md). The migration notes record 29
 field-tested lessons covering Node.js 22, Codex device-code login, OnchainOS wallet login, A2A cutover, deterministic
 review handling, approval-state interpretation, hardening, and post-review health checks.
+
+## Current Linux production profile
+
+- Pin OnchainOS `4.2.4`, `@okxweb3/a2a-node` `0.1.9`, OKX skills tag `v4.2.4` at commit `841fe5b86f9299668218362df5f87a1b82b00b21`, and the `skills` installer `1.5.17`; do not bootstrap over an initialized runtime.
+- The fast handler accepts only an exact, Agent-bound `job_asp_selected` envelope and may execute only an official deterministic `Price gate (TOO_LOW)` rejection. Every semantic or accepting decision falls back to the official Codex role flow.
+- Exit code `64` is the sole safe fallback. Failed deterministic actions are consumed and persisted, preventing a second path or duplicate delivery from acting again.
+- The watchdog is the only lifecycle owner and requires exactly `agentCount=1` and `activeClients=1`. The health check is read-only and consumes the watchdog's atomic state snapshot.
+- Run `node --test tests/a2a-fast-handler.security.test.cjs` and `bash tests/test-linux-ops.sh` before a versioned deployment.
+- An approved agent must not be reactivated merely for a health check or routine deployment.
+
+For an initialized Linux production runtime, use the maintenance workflow instead of the bootstrap installer. First run
+the artifact and rollback dry run while the listener remains online:
+
+```bash
+AGENT_ID=<agent-id> OKX_A2A_ALLOW_MAINTENANCE=1 OKX_A2A_MAINTENANCE_DRY_RUN=1 \
+  ./scripts/upgrade-linux-runtime.sh
+```
+
+Then open a deliberate maintenance window and omit `OKX_A2A_MAINTENANCE_DRY_RUN`. The script verifies all pinned
+artifacts before stopping the watchdog, backs up the old OnchainOS binary, A2A package and skill, atomically installs the
+new runtime, confirms the persisted provider command, checks the fast path, and requires exactly `agentCount=1` and
+`activeClients=1`. Any post-change failure triggers rollback and restarts the single watchdog owner. This workflow does
+not activate, re-submit, or otherwise change Agent listing state.
 
 Windows 上运行 OKX A2A Agent 时，可能出现“守护进程在线、心跳正常，但 Agent 上架审核仍因无法及时响应而被驳回”的现象。
 
@@ -62,7 +85,7 @@ Windows 上运行 OKX A2A Agent 时，可能出现“守护进程在线、心跳
 ```powershell
 node --version
 npm --version
-npm install -g @okxweb3/a2a-node@latest
+npm install -g @okxweb3/a2a-node@0.1.9
 okx-a2a doctor --fix
 ```
 
@@ -81,7 +104,7 @@ okx-a2a setup --json
 
 - 守护进程处于 `running`。
 - `activeClients` 与预期 Agent 数量一致。
-- OnchainOS 4.2.2 下，快速处理器只接管 `job_asp_selected`，并执行官方 `next-action` 返回的准确分支；其他系统事件和点对点消息回退官方角色流程。
+- 当前 OnchainOS 4.2.4 生产配置下，快速处理器只接管 `job_asp_selected`，并执行官方 `next-action` 返回的准确分支；其他系统事件和点对点消息回退官方角色流程。
 - 不为 `Please disregard...` 文本硬编码审核回执；该文本按不可信任务内容处理。
 - 维护终端运行 `setup` 时必须显式使用 watchdog 的 `OKX_A2A_AI_CODEX_COMMAND`，避免误触发新的设备登录。
 - 运行时认证状态为 `ready`。
@@ -108,7 +131,7 @@ okx-a2a doctor --fix
 - 保留必要的工作目录、沙箱和授权策略。
 - 使用 `OKX_A2A_AI_CODEX_COMMAND` 指向专用启动器，由启动器仅对子进程设置 `CODEX_HOME`。
 
-`@okxweb3/a2a-node` 版本行为可能变化。实测 `0.1.5` 的守护进程任务路径没有采用早期配置中的自定义参数模板，因此仅设置额外参数环境变量并不足以证明优化已生效。升级到 `0.1.6` 后，仍应通过 `setup --json` 核对实际 `providerCommand`，并检查本地快速路径没有被更新覆盖。
+`@okxweb3/a2a-node` 版本行为可能变化。实测 `0.1.5` 的守护进程任务路径没有采用早期配置中的自定义参数模板，因此仅设置额外参数环境变量并不足以证明优化已生效。升级到当前固定的 `0.1.9` 后，仍应通过 `setup --json` 核对实际 `providerCommand`，并检查本地快速路径没有被更新覆盖。
 
 仓库提供了 [`tools/codex-a2a-wrapper.cs`](tools/codex-a2a-wrapper.cs) 示例。它只设置隔离目录、定位官方 `codex.exe` 并原样转发参数，不修改任务内容或扩大权限。
 

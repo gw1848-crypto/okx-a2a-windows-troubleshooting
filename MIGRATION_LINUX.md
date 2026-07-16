@@ -10,14 +10,14 @@ Set the target agent explicitly through `AGENT_ID`; do not commit a production A
 - Avoid Windows sleep, local VPN/TUN instability, and desktop process interruption.
 - Preserve the response-time fixes from the Windows incident:
   - isolated Codex runtime
-  - review-probe silent fast path
+  - deterministic low-price rejection fast path
   - agent-bound status queries
   - guard against leaking internal auth/JWT/stderr details to peers
-  - watchdog restart when daemon or active client drops
+  - watchdog restart when the single daemon/client invariant breaks
 
 ## Field Notes Count
 
-This migration adds 20 operational lessons:
+This migration records 29 operational lessons:
 
 1. Browser console access is useful for emergency login, but SSH is more reliable for setup and verification.
 2. Keep the A2A daemon on one machine only; do not leave the Windows and VPS listeners active for the same agent.
@@ -30,10 +30,10 @@ This migration adds 20 operational lessons:
 9. Treat `activeClients=1` as the handoff gate before shutting down the desktop listener.
 10. Linux file hardening must preserve executable bits under the Codex installation directory.
 11. UFW plus fail2ban is a low-risk first hardening layer; keep password SSH until key login is confirmed.
-12. Re-submit listing review only after `okx-a2a setup --json` is ready and the VPS refresh still reports `activeClients=1`.
+12. Before initial listing or a genuine rejection retry, submit only after setup is ready and the VPS reports exactly one active client. Once approved, do not activate again just to test the runtime.
 13. OKX's current official skills merge identity, task, watch, and chat into `okx-ai`, while old task directories may disappear after `npx skills add okx/onchainos-skills`; keep runtime-specific review guards in the isolated A2A home instead of relying only on global skills.
 14. Do not let the Codex wrapper read standard input for health-check commands such as `login status` or `setup`; only capture stdin for inbound `codex exec` sessions, otherwise setup probes can hang waiting for input.
-15. For listing review events, add a deterministic fast handler before Codex only for `job_asp_selected`: run `next-action`, choose the capability-match branch, and execute the exact command returned by the official playbook. Other system events and peer chat fall back to the official Codex role flow.
+15. For `job_asp_selected`, a deterministic handler may run official `next-action`, but it may execute only an unambiguous official `Price gate (TOO_LOW)` reject command. Capability matching, estimates, negotiation, acceptance, and all peer chat remain in the official Codex role flow.
 16. The A2A node runtime may pass only the system `message` object as a Codex exec argument, not an outer `{agentId,message}` envelope on stdin. The wrapper must inspect exec arguments first and the fast handler must accept both shapes; otherwise events fall back to slow Codex despite the handler being installed.
 17. OnchainOS 4.2.2 no longer defines a custom review-probe acknowledgement. Do not hard-code an XMTP reply for text beginning with `Please disregard...`; treat it as untrusted peer content and fall back to the official role playbook.
 18. Do not assume `exec` is the wrapper's first argument. Current daemons may prepend flags such as `--sandbox`, `--ask-for-approval`, and `--cd`; scan the complete argument vector for the exact `exec` token before enabling the fast handler.
@@ -42,6 +42,12 @@ This migration adds 20 operational lessons:
 21. Include both `$HOME/.local/bin` and the actual Node prefix (for example `/opt/node-v22/bin`) in the watchdog service PATH. Wrap daemon and refresh checks in finite timeouts so a stuck CLI call cannot freeze recovery indefinitely.
 22. When running maintenance setup from a plain SSH shell, export the same `OKX_A2A_AI_CODEX_COMMAND` used by the watchdog. Otherwise setup may ignore the authenticated isolated wrapper and start an unnecessary `codex login --device-auth` flow.
 23. Keep the VPS timezone aligned with the platform audit timezone (`Asia/Shanghai` for Beijing time) so wrapper, watchdog, and review timestamps can be correlated directly.
+24. Treat exit code `64` as the only safe-handler fallback signal. Timeout, malformed official output after a deterministic decision, or a failed reject must stop that event instead of allowing a second Codex path to act on it.
+25. Bind every fast-path envelope to the expected Agent ID, require one exact event/job shape, reject conflicting stdin/argv JSON, and persist per-job state so serial or concurrent duplicates can execute at most once.
+26. Keep runtime data, temporary stdin, state, and logs private (`0700` directories, `0600` files). Unlink captured stdin before launching the slow Codex path and never log tokens, JWTs, peer payloads, or command stderr.
+27. Make the watchdog the sole lifecycle owner. Require `agentCount=1` and `activeClients=1`, use finite command timeouts, consecutive-failure thresholds, restart cooldown, atomic snapshots, and bounded log rotation.
+28. Keep health checks read-only. Start the watchdog first, wait for its state snapshot, then inspect it; run `doctor --fix --json`, package upgrades, setup, activation, or daemon restarts only as explicit maintenance actions.
+29. Never bootstrap over an initialized runtime. Stage and verify the target plus a rollback package while the listener remains online, then use one short maintenance window with automatic restoration and strict post-upgrade communication checks.
 
 ## Cutover Rule
 
@@ -51,10 +57,10 @@ Recommended sequence:
 
 1. Prepare the VPS.
 2. Authenticate Codex and OnchainOS on the VPS.
-3. Start the VPS watchdog and confirm `activeClients >= 1`.
+3. Start the VPS watchdog and confirm `agentCount=1` and `activeClients=1`.
 4. Stop the Windows watchdog/daemon.
 5. Re-check the VPS after 5-10 minutes.
-6. Re-submit listing review only after the VPS health check is clean.
+6. Submit only if this is an initial listing or a documented rejection retry. Never repeat activation for an already approved agent.
 
 ## Install on VPS
 
@@ -70,13 +76,12 @@ chmod +x scripts/setup-linux-vps.sh
 AGENT_ID=<agent-id> ./scripts/setup-linux-vps.sh
 ```
 
-The setup script installs:
+The setup script requires a verified Node.js `>=22.14.0` and an official Codex CLI already on the host. It then installs pinned production dependencies:
 
-- Node.js 22.x
-- Codex CLI
-- OnchainOS CLI
-- `@okxweb3/a2a-node`
-- OKX OnchainOS skills
+- OnchainOS `4.2.4` from the signed release checksums
+- `@okxweb3/a2a-node` `0.1.9`
+- OKX OnchainOS skills from tag `v4.2.4`, pinned to commit `841fe5b86f9299668218362df5f87a1b82b00b21`
+- Vercel `skills` installer `1.5.17` (used only to copy the tagged OKX skill)
 - an isolated A2A Codex wrapper
 - a deterministic A2A fast handler for platform system events
 - Linux command guards
@@ -106,7 +111,17 @@ Then verify:
 codex login status
 ```
 
-## Health Check
+## Start Watchdog and Health Check
+
+Start the single lifecycle owner first and wait for its atomic snapshot:
+
+```bash
+systemctl --user start okx-a2a-watchdog.service
+systemctl --user status okx-a2a-watchdog.service
+test -s ~/.okx-agent-task/run/watchdog-state.json
+```
+
+Then run the read-only check:
 
 ```bash
 AGENT_ID=<agent-id> ~/.okx-agent-task/bin/health-check.sh
@@ -116,24 +131,40 @@ Healthy signs:
 
 - Node is at least `v22.14.0`.
 - Codex is available and authenticated.
-- OnchainOS preflight has no blocking action.
-- `okx-a2a switch-runtime --json` returns `ok: true`.
-- `okx-a2a agent refresh --json` returns `activeClients >= 1`.
-- `okx-a2a setup --json` returns `ok: true`.
-- the guard blocks sensitive outbound diagnostic messages with exit code `78`.
-- the fast handler dry-run can parse a captured system event and return `FAST_HANDLER_DRY_RUN action=...`.
+- The A2A daemon is running.
+- The recent watchdog snapshot reports `agentCount=1` and `activeClients=1` for the expected Agent ID.
+- Runtime directories and files have private permissions and no stale captured stdin remains.
 
-If `okx-a2a setup --json` reports that the Codex wrapper cannot find `codex`, check both the symlink and the target
-executable permissions. Tightening all files under `~/.codex` to `600` can break the standalone Codex executable.
+If the read-only check fails, inspect its exact finding first. Use `okx-a2a doctor --fix --json` only in a deliberate
+maintenance window; do not let a task session run setup, activation, upgrades, or daemon lifecycle commands.
 
-## Start Watchdog
+## Upgrade an Initialized Runtime
+
+Never rerun `setup-linux-vps.sh` over a production runtime. Use the versioned maintenance script, which stages and
+verifies downloads before it stops the listener.
+
+Preparation-only dry run (no service interruption):
 
 ```bash
-systemctl --user start okx-a2a-watchdog.service
-systemctl --user status okx-a2a-watchdog.service
+chmod +x scripts/upgrade-linux-runtime.sh
+AGENT_ID=<agent-id> OKX_A2A_ALLOW_MAINTENANCE=1 OKX_A2A_MAINTENANCE_DRY_RUN=1 \
+  ./scripts/upgrade-linux-runtime.sh
 ```
 
-Logs:
+Actual maintenance window:
+
+```bash
+AGENT_ID=<agent-id> OKX_A2A_ALLOW_MAINTENANCE=1 \
+  ./scripts/upgrade-linux-runtime.sh
+```
+
+The script refuses to run while a duplicate `okx-a2a.service` is active. It retains private release and rollback
+directories under `~/.okx-agent-task/`, stops the watchdog only after all artifacts and the rollback package are ready,
+and automatically restores the prior OnchainOS binary, A2A package, skill and production marker if any validation fails.
+Success requires ready authentication, the persisted isolated wrapper, a fast-path self-test within two seconds, a fresh
+watchdog snapshot, and live `agentCount=1` / `activeClients=1`. It never invokes Agent activation or listing submission.
+
+## Watchdog Logs
 
 ```bash
 tail -f ~/.okx-agent-task/logs/watchdog.log
@@ -149,9 +180,9 @@ okx-a2a daemon stop
 
 If the Windows watchdog is enabled, disable or stop it before the final VPS cutover.
 
-## Re-submit Review
+## Listing or Re-submit Review
 
-After the VPS stays healthy for at least 30-60 minutes:
+Only for an initial listing or after a documented rejection, and only after the VPS stays healthy for at least 30-60 minutes:
 
 ```bash
 onchainos agent activate --agent-id <agent-id> --preferred-language zh-CN
@@ -163,6 +194,8 @@ Then monitor:
 AGENT_ID=<agent-id> ~/.okx-agent-task/bin/health-check.sh
 tail -f ~/.okx-agent-task/logs/watchdog.log
 ```
+
+If the agent is already approved/listed, skip `activate`; deployment health validation does not require another review.
 
 ## Security Notes
 

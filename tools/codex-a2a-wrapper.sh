@@ -1,11 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Anything captured from an inbound task can contain customer data. Keep new
+# directories and temporary files private even when the caller has a loose
+# login-shell umask.
+umask 077
+
 BASE="${OKX_A2A_BASE:-$HOME/.okx-agent-task}"
 CODEX_HOME_DIR="${OKX_A2A_CODEX_HOME:-$BASE/codex-home}"
 SQLITE_HOME_DIR="${OKX_A2A_CODEX_SQLITE_HOME:-$CODEX_HOME_DIR/sqlite}"
+FAST_FALLBACK_STATUS=64
+STDIN_FILE=""
 
 mkdir -p "$CODEX_HOME_DIR" "$SQLITE_HOME_DIR" "$BASE/guard-bin" "$BASE/run" "$BASE/logs"
+chmod 0700 "$CODEX_HOME_DIR" "$SQLITE_HOME_DIR" "$BASE/guard-bin" "$BASE/run" "$BASE/logs"
+
+cleanup_stdin_file() {
+  if [ -n "$STDIN_FILE" ]; then
+    rm -f -- "$STDIN_FILE"
+    STDIN_FILE=""
+  fi
+}
+
+trap cleanup_stdin_file EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 export CODEX_HOME="$CODEX_HOME_DIR"
 export CODEX_SQLITE_HOME="$SQLITE_HOME_DIR"
@@ -39,6 +59,9 @@ if [ "$IS_CODEX_EXEC" = "true" ] && [ -x "$BASE/bin/a2a-fast-handler.cjs" ]; the
   if [ "$FAST_ARG_STATUS" -eq 0 ]; then
     exit 0
   fi
+  if [ "$FAST_ARG_STATUS" -ne "$FAST_FALLBACK_STATUS" ]; then
+    exit "$FAST_ARG_STATUS"
+  fi
 
   if [ ! -t 0 ]; then
     STDIN_FILE="$(mktemp "$BASE/run/a2a-stdin.XXXXXX")"
@@ -50,12 +73,21 @@ if [ "$IS_CODEX_EXEC" = "true" ] && [ -x "$BASE/bin/a2a-fast-handler.cjs" ]; the
       FAST_STDIN_STATUS=$?
       set -e
       if [ "$FAST_STDIN_STATUS" -eq 0 ]; then
-        rm -f "$STDIN_FILE"
         exit 0
       fi
-      exec "$REAL_CODEX" "$@" < "$STDIN_FILE"
+      if [ "$FAST_STDIN_STATUS" -ne "$FAST_FALLBACK_STATUS" ]; then
+        exit "$FAST_STDIN_STATUS"
+      fi
+
+      # Open the captured input first, unlink its directory entry, then make
+      # it Codex's stdin. The anonymous file survives only until Codex closes
+      # it, so exec cannot leave customer content in BASE/run.
+      exec 9<"$STDIN_FILE"
+      rm -f -- "$STDIN_FILE"
+      STDIN_FILE=""
+      exec "$REAL_CODEX" "$@" <&9 9<&-
     fi
-    rm -f "$STDIN_FILE"
+    cleanup_stdin_file
   fi
 fi
 
