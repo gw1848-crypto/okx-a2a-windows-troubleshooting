@@ -18,6 +18,10 @@ if [ -z "$AGENT_ID" ]; then
   exit 2
 fi
 
+if [ -L "$BASE/.production-initialized" ] || { [ -e "$BASE/.production-initialized" ] && [ ! -f "$BASE/.production-initialized" ]; }; then
+  echo "Refusing to use a production marker that is not a regular non-symlink file." >&2
+  exit 3
+fi
 if [ -f "$BASE/.production-initialized" ] && [ "${OKX_A2A_ALLOW_BOOTSTRAP_REPAIR:-0}" != "1" ]; then
   echo "Refusing to run the bootstrap installer over an initialized production runtime." >&2
   echo "Use the versioned maintenance/deploy workflow instead." >&2
@@ -123,10 +127,41 @@ if [ "$(timeout 30s git ls-remote https://github.com/okx/onchainos-skills.git "r
 fi
 npm install -g "@okxweb3/a2a-node@${A2A_NODE_VERSION}"
 npm list -g --depth=0 "@okxweb3/a2a-node@${A2A_NODE_VERSION}" >/dev/null
-CODEX_HOME="$BASE/codex-home" npx --yes "skills@${SKILLS_CLI_VERSION}" add \
-  "https://github.com/okx/onchainos-skills/tree/${SKILLS_COMMIT}" \
+
+skills_stage="$(mktemp -d)"
+case "$skills_stage" in
+  /tmp/*) ;;
+  *) echo "Unexpected skills staging directory: $skills_stage" >&2; exit 1 ;;
+esac
+cleanup_skills_stage() {
+  case "$skills_stage" in
+    /tmp/*) rm -rf -- "$skills_stage" ;;
+  esac
+}
+trap cleanup_skills_stage EXIT
+install -d -m 0700 "$skills_stage/home" "$skills_stage/codex-home" "$BASE/codex-home/skills"
+HOME="$skills_stage/home" CODEX_HOME="$skills_stage/codex-home" \
+  timeout 180s npx --yes "skills@${SKILLS_CLI_VERSION}" add \
+  "https://github.com/okx/onchainos-skills/tree/${SKILLS_TAG}" \
   --skill okx-ai --agent codex --global --copy --yes
-test -f "$BASE/codex-home/skills/okx-ai/SKILL.md"
+staged_skill="$skills_stage/home/.agents/skills/okx-ai"
+test -f "$staged_skill/SKILL.md"
+test ! -L "$staged_skill"
+test ! -L "$staged_skill/SKILL.md"
+test -z "$(find "$staged_skill" -type l -print -quit)"
+new_skill="$BASE/codex-home/skills/.okx-ai.new.$$"
+cp -a "$staged_skill" "$new_skill"
+if [ -e "$BASE/codex-home/skills/okx-ai" ] || [ -L "$BASE/codex-home/skills/okx-ai" ]; then
+  [ -d "$BASE/codex-home/skills/okx-ai" ] && [ ! -L "$BASE/codex-home/skills/okx-ai" ] || {
+    echo "Existing production skill path is not a regular non-symlink directory." >&2
+    exit 1
+  }
+  mv "$BASE/codex-home/skills/okx-ai" "$BASE/state/okx-ai.bootstrap-backup.$(date -u +%Y%m%dT%H%M%SZ)"
+fi
+mv "$new_skill" "$BASE/codex-home/skills/okx-ai"
+chmod 0700 "$BASE/codex-home/skills/okx-ai"
+cleanup_skills_stage
+trap - EXIT
 
 install -m 0755 "$REPO_DIR/tools/codex-a2a-wrapper.sh" "$BASE/bin/codex-a2a-wrapper.sh"
 install -m 0755 "$REPO_DIR/tools/a2a-fast-handler.cjs" "$BASE/bin/a2a-fast-handler.cjs"
@@ -151,21 +186,18 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# Verified on the unprivileged VPS user manager. Do not add directives that
+# require unavailable device, clock, UTS, kernel-module, or capability setup.
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
-PrivateDevices=true
 ProtectSystem=full
-ProtectClock=true
-ProtectHostname=true
 ProtectKernelTunables=true
-ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 SystemCallArchitectures=native
-CapabilityBoundingSet=
 Environment=AGENT_ID=$AGENT_ID
 Environment=OKX_A2A_BASE=$BASE
 Environment=OKX_A2A_AI_CODEX_COMMAND=$BASE/bin/codex-a2a-wrapper.sh

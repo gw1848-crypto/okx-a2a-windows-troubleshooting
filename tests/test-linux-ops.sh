@@ -48,6 +48,37 @@ grep -q 'TARGET_A2A_VERSION="0.1.9"' "$ROOT/scripts/upgrade-linux-runtime.sh" ||
   fail "runtime upgrade does not pin A2A Node 0.1.9"
 grep -q 'TARGET_SKILLS_COMMIT="841fe5b86f9299668218362df5f87a1b82b00b21"' \
   "$ROOT/scripts/upgrade-linux-runtime.sh" || fail "runtime upgrade does not pin the OKX skills commit"
+grep -q 'onchainos-skills/tree/${TARGET_SKILLS_TAG}' "$ROOT/scripts/upgrade-linux-runtime.sh" || \
+  fail "runtime upgrade does not install from the verified skills tag"
+grep -q 'HOME="$release/installer-home"' "$ROOT/scripts/upgrade-linux-runtime.sh" || \
+  fail "runtime upgrade does not isolate skills installer writes from the live home"
+grep -q 'HOME="$skills_stage/home"' "$ROOT/scripts/setup-linux-vps.sh" || \
+  fail "bootstrap does not isolate skills installer writes from the live home"
+grep -q 'onchainos-skills/tree/${SKILLS_TAG}' "$ROOT/scripts/setup-linux-vps.sh" || \
+  fail "bootstrap does not install from the verified skills tag"
+grep -q 'OKX_A2A_ALLOW_LEGACY_BASELINE' "$ROOT/scripts/upgrade-linux-runtime.sh" || \
+  fail "runtime upgrade does not guard legacy baseline migration"
+grep -q 'legacy-skill-existed=' "$ROOT/scripts/upgrade-linux-runtime.sh" || \
+  fail "runtime upgrade does not record legacy skill absence for rollback"
+for directive in \
+  'PrivateDevices=true' \
+  'ProtectClock=true' \
+  'ProtectHostname=true' \
+  'ProtectKernelModules=true' \
+  'CapabilityBoundingSet='; do
+  if grep -Fqx "$directive" "$ROOT/scripts/setup-linux-vps.sh"; then
+    fail "user systemd unit includes VPS-incompatible directive: $directive"
+  fi
+done
+for directive in \
+  'UMask=0077' \
+  'NoNewPrivileges=true' \
+  'PrivateTmp=true' \
+  'ProtectSystem=full' \
+  'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6'; do
+  grep -Fqx "$directive" "$ROOT/scripts/setup-linux-vps.sh" || \
+    fail "user systemd unit is missing verified hardening: $directive"
+done
 set +e
 AGENT_ID=424242 OKX_A2A_BASE="$TMP_ROOT/not-initialized" \
   "$ROOT/scripts/upgrade-linux-runtime.sh" >/dev/null 2>&1
@@ -159,7 +190,7 @@ case "$*" in
   "--version") echo "0.1.8" ;;
   "daemon status") printf 'running pid=123\nready=true\n' ;;
   "agent refresh --json") printf '%s\n' "$MOCK_REFRESH_JSON" ;;
-  "daemon start --no-autostart"|"daemon restart") ;;
+  "daemon start --no-autostart"|"daemon stop") ;;
   *) echo "unexpected okx-a2a arguments: $*" >&2; exit 64 ;;
 esac
 EOF
@@ -182,7 +213,18 @@ MOCK_A2A_CALLS="$CALL_LOG" MOCK_REFRESH_JSON='{"payload":{"agentCount":2,"active
   "$ROOT/scripts/watchdog-linux.sh" >/dev/null
 grep -q '"agentCount":2,"activeClients":2,"healthy":false,"reason":"agent_count_mismatch"' \
   "$WATCH_BASE/run/watchdog-state.json" || fail "agent-count mismatch was not rejected"
-! grep -q '^daemon restart$' "$CALL_LOG" || fail "configuration mismatch caused a daemon restart"
+! grep -Eq '^daemon (stop|start --no-autostart)$' "$CALL_LOG" || \
+  fail "configuration mismatch caused a daemon restart"
+
+: >"$CALL_LOG"
+MOCK_A2A_CALLS="$CALL_LOG" MOCK_REFRESH_JSON='{"payload":{"agentCount":1,"activeClients":0}}' \
+  WATCHDOG_FAILURES_BEFORE_RESTART=1 WATCHDOG_RUN_ONCE=1 AGENT_ID=424242 \
+  OKX_A2A_BASE="$WATCH_BASE" HOME="$WATCH_HOME" \
+  "$ROOT/scripts/watchdog-linux.sh" >/dev/null
+grep -qx 'daemon stop' "$CALL_LOG" || fail "restart did not stop the existing daemon"
+grep -qx 'daemon start --no-autostart' "$CALL_LOG" || \
+  fail "restart did not preserve the single no-autostart lifecycle owner"
+! grep -q '^daemon restart$' "$CALL_LOG" || fail "restart used the autostart-capable shortcut"
 
 : >"$CALL_LOG"
 set +e

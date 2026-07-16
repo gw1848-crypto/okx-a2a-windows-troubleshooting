@@ -48,6 +48,9 @@ This migration records 29 operational lessons:
 27. Make the watchdog the sole lifecycle owner. Require `agentCount=1` and `activeClients=1`, use finite command timeouts, consecutive-failure thresholds, restart cooldown, atomic snapshots, and bounded log rotation.
 28. Keep health checks read-only. Start the watchdog first, wait for its state snapshot, then inspect it; run `doctor --fix --json`, package upgrades, setup, activation, or daemon restarts only as explicit maintenance actions.
 29. Never bootstrap over an initialized runtime. Stage and verify the target plus a rollback package while the listener remains online, then use one short maintenance window with automatic restoration and strict post-upgrade communication checks.
+30. Test systemd hardening in the actual unprivileged user manager, not only with `systemd-analyze verify`. On VPS/container hosts, `PrivateDevices`, `ProtectClock`, `ProtectKernelModules`, or an empty `CapabilityBoundingSet` may terminate a user unit with status `218/CAPABILITIES`, while `ProtectHostname` may be ignored because UTS namespaces are unavailable. Keep only directives proven by a transient runtime probe and require a successful service start before committing the unit.
+31. A manually migrated, already-listed runtime may predate both `.production-initialized` and the isolated `okx-ai` skill. Do not invent either artifact before verification or rerun the full bootstrap over production. Use the explicit `OKX_A2A_ALLOW_LEGACY_BASELINE=1` maintenance gate so the upgrade backs up the installed binaries, records that the marker/skill were absent, installs the pinned skill atomically, and removes the new baseline again if post-change validation fails.
+32. The `skills` CLI may interpret `/tree/<commit-sha>` as a branch name and may write `--global` installs to `~/.agents/skills` even when only `CODEX_HOME` is overridden. First verify that the immutable release tag resolves to the pinned commit, install from `/tree/<tag>`, and set both `HOME` and `CODEX_HOME` to a private staging root. Copy the verified result into the isolated production skill directory only after rejecting symlinks.
 
 ## Cutover Rule
 
@@ -157,6 +160,10 @@ Actual maintenance window:
 AGENT_ID=<agent-id> OKX_A2A_ALLOW_MAINTENANCE=1 \
   ./scripts/upgrade-linux-runtime.sh
 ```
+
+If an already-listed manual migration is verified to predate both the marker and isolated skill, add
+`OKX_A2A_ALLOW_LEGACY_BASELINE=1` to both commands. This flag accepts only absent artifacts; it does not bypass a
+symlink, wrong file type, corrupt marker, or corrupt skill path.
 
 The script refuses to run while a duplicate `okx-a2a.service` is active. It retains private release and rollback
 directories under `~/.okx-agent-task/`, stops the watchdog only after all artifacts and the rollback package are ready,

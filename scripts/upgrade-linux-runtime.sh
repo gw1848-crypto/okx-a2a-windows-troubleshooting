@@ -24,6 +24,9 @@ fi
 if [ "${OKX_A2A_MAINTENANCE_DRY_RUN:-0}" != "0" ] && [ "${OKX_A2A_MAINTENANCE_DRY_RUN:-0}" != "1" ]; then
   die "OKX_A2A_MAINTENANCE_DRY_RUN must be 0 or 1"
 fi
+if [ "${OKX_A2A_ALLOW_LEGACY_BASELINE:-0}" != "0" ] && [ "${OKX_A2A_ALLOW_LEGACY_BASELINE:-0}" != "1" ]; then
+  die "OKX_A2A_ALLOW_LEGACY_BASELINE must be 0 or 1"
+fi
 if ! [[ "$AGENT_ID" =~ ^[0-9]+$ ]]; then
   die "AGENT_ID must be the numeric production Agent ID"
 fi
@@ -31,8 +34,13 @@ case "$BASE" in
   /*) ;;
   *) die "OKX_A2A_BASE must be an absolute path" ;;
 esac
-if [ ! -f "$BASE/.production-initialized" ]; then
-  die "production marker is missing; use the bootstrap installer only for a new runtime"
+marker_existed=0
+if [ -f "$BASE/.production-initialized" ] && [ ! -L "$BASE/.production-initialized" ]; then
+  marker_existed=1
+elif [ -e "$BASE/.production-initialized" ] || [ -L "$BASE/.production-initialized" ]; then
+  die "production marker exists but is not a regular non-symlink file"
+elif [ "${OKX_A2A_ALLOW_LEGACY_BASELINE:-0}" != "1" ]; then
+  die "production marker is missing; set OKX_A2A_ALLOW_LEGACY_BASELINE=1 only for a verified legacy production migration"
 fi
 
 export PATH="$HOME/.local/bin:/opt/node-v22/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
@@ -77,12 +85,25 @@ expected_onchainos_path="$HOME/.local/bin/onchainos"
 
 skills_parent="$BASE/codex-home/skills"
 skills_dir="$skills_parent/okx-ai"
-[ -d "$skills_dir" ] && [ ! -L "$skills_dir" ] || die "production okx-ai skill directory is missing or a symlink"
+if [ -e "$skills_parent" ] || [ -L "$skills_parent" ]; then
+  [ -d "$skills_parent" ] && [ ! -L "$skills_parent" ] || \
+    die "production skills parent exists but is not a regular non-symlink directory"
+else
+  install -d -m 0700 "$skills_parent"
+fi
+skill_existed=0
+if [ -d "$skills_dir" ] && [ ! -L "$skills_dir" ]; then
+  skill_existed=1
+elif [ -e "$skills_dir" ] || [ -L "$skills_dir" ]; then
+  die "production okx-ai skill path exists but is not a regular non-symlink directory"
+elif [ "${OKX_A2A_ALLOW_LEGACY_BASELINE:-0}" != "1" ]; then
+  die "production okx-ai skill directory is missing; set OKX_A2A_ALLOW_LEGACY_BASELINE=1 only for a verified legacy production migration"
+fi
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 backup="$BASE/backups/runtime-$stamp"
 release="$BASE/releases/runtime-$stamp"
-install -d -m 0700 "$backup" "$release" "$release/codex-home"
+install -d -m 0700 "$backup" "$release" "$release/codex-home" "$release/installer-home"
 
 echo "Preparing verified artifacts while the A2A listener remains online..."
 
@@ -138,15 +159,19 @@ target_tarball_integrity="$(node -e '
 [ "$target_tarball_integrity" = "$TARGET_A2A_INTEGRITY" ] || die "downloaded A2A Node tarball integrity mismatch"
 
 skills_log="$release/skills-install.log"
-CODEX_HOME="$release/codex-home" timeout 180s npx --yes "skills@${SKILLS_CLI_VERSION}" add \
-  "https://github.com/okx/onchainos-skills/tree/${TARGET_SKILLS_COMMIT}" \
+HOME="$release/installer-home" CODEX_HOME="$release/codex-home" \
+  timeout 180s npx --yes "skills@${SKILLS_CLI_VERSION}" add \
+  "https://github.com/okx/onchainos-skills/tree/${TARGET_SKILLS_TAG}" \
   --skill okx-ai --agent codex --global --copy --yes >"$skills_log" 2>&1
-staged_skill="$release/codex-home/skills/okx-ai"
+staged_skill="$release/installer-home/.agents/skills/okx-ai"
 [ -f "$staged_skill/SKILL.md" ] && [ ! -L "$staged_skill" ] && [ ! -L "$staged_skill/SKILL.md" ] || \
   die "staged OKX skill is missing or contains an unexpected symlink"
+[ -z "$(find "$staged_skill" -type l -print -quit)" ] || die "staged OKX skill contains a symlink"
 
 cp -p "$onchainos_path" "$backup/onchainos"
-cp -a "$skills_dir" "$backup/okx-ai"
+if [ "$skill_existed" -eq 1 ]; then
+  cp -a "$skills_dir" "$backup/okx-ai"
+fi
 rollback_a2a_tarball="$(pack_to "$backup" "@okxweb3/a2a-node@${current_a2a}")"
 current_a2a_integrity="$(timeout 30s npm view "@okxweb3/a2a-node@${current_a2a}" dist.integrity)"
 rollback_tarball_integrity="$(node -e '
@@ -157,10 +182,8 @@ rollback_tarball_integrity="$(node -e '
 ' "$rollback_a2a_tarball")"
 [ -n "$current_a2a_integrity" ] && [ "$rollback_tarball_integrity" = "$current_a2a_integrity" ] || \
   die "rollback A2A Node tarball integrity mismatch"
-marker_existed=0
-if [ -f "$BASE/.production-initialized" ]; then
+if [ "$marker_existed" -eq 1 ]; then
   cp -p "$BASE/.production-initialized" "$backup/production-initialized"
-  marker_existed=1
 fi
 printf '%s\n' \
   "started=$stamp" \
@@ -171,6 +194,8 @@ printf '%s\n' \
   "a2a-target=$TARGET_A2A_VERSION" \
   "skills-target=$TARGET_SKILLS_TAG" \
   "skills-commit=$TARGET_SKILLS_COMMIT" \
+  "legacy-marker-existed=$marker_existed" \
+  "legacy-skill-existed=$skill_existed" \
   >"$backup/manifest"
 sha256sum "$backup/onchainos" "$rollback_a2a_tarball" "$release/$onchainos_asset" "$target_a2a_tarball" \
   >"$backup/artifact-sha256"
@@ -180,6 +205,7 @@ if [ "${OKX_A2A_MAINTENANCE_DRY_RUN:-0}" = "1" ]; then
     "Maintenance dry run complete; the listener was not stopped." \
     "Current: OnchainOS $current_onchainos, A2A Node $current_a2a" \
     "Target: OnchainOS $TARGET_ONCHAINOS_VERSION, A2A Node $TARGET_A2A_VERSION" \
+    "Legacy baseline: marker-existed=$marker_existed skill-existed=$skill_existed" \
     "Verified release: $release" \
     "Verified rollback backup: $backup"
   exit 0
@@ -198,12 +224,16 @@ rollback_runtime() {
   mv -f "$expected_onchainos_path.rollback" "$expected_onchainos_path"
   timeout 180s npm install -g "$rollback_a2a_tarball" >/dev/null 2>"$backup/rollback-a2a.err"
 
-  rollback_skill="$skills_parent/.okx-ai.rollback.$stamp"
-  cp -a "$backup/okx-ai" "$rollback_skill"
-  if [ -e "$skills_dir" ]; then
+  if [ "$skill_existed" -eq 1 ]; then
+    rollback_skill="$skills_parent/.okx-ai.rollback.$stamp"
+    cp -a "$backup/okx-ai" "$rollback_skill"
+    if [ -e "$skills_dir" ]; then
+      mv "$skills_dir" "$backup/failed-okx-ai"
+    fi
+    mv "$rollback_skill" "$skills_dir"
+  elif [ -e "$skills_dir" ]; then
     mv "$skills_dir" "$backup/failed-okx-ai"
   fi
-  mv "$rollback_skill" "$skills_dir"
 
   if [ "$marker_existed" -eq 1 ]; then
     cp -p "$backup/production-initialized" "$BASE/.production-initialized.rollback"
@@ -229,6 +259,7 @@ trap on_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+maintenance_started_epoch="$(date +%s)"
 echo "Entering the short maintenance window..."
 timeout 30s systemctl --user stop okx-a2a-watchdog.service
 changed=1
@@ -248,7 +279,9 @@ timeout 180s npm install -g "$target_a2a_tarball" >"$release/a2a-install.log" 2>
 
 new_skill="$skills_parent/.okx-ai.new.$stamp"
 cp -a "$staged_skill" "$new_skill"
-mv "$skills_dir" "$backup/live-okx-ai"
+if [ "$skill_existed" -eq 1 ]; then
+  mv "$skills_dir" "$backup/live-okx-ai"
+fi
 mv "$new_skill" "$skills_dir"
 
 setup_file="$release/setup.json"
@@ -263,6 +296,13 @@ node -e '
     process.exit(1);
   }
 ' "$setup_file" || die "A2A setup did not confirm ready auth and the persisted provider command"
+
+# A2A setup may recreate or start its own user service. The watchdog remains
+# the sole lifecycle owner and always launches the daemon with --no-autostart.
+timeout 30s systemctl --user stop okx-a2a.service >/dev/null 2>&1 || true
+if systemctl --user is-active --quiet okx-a2a.service 2>/dev/null; then
+  die "A2A setup left the duplicate okx-a2a.service active"
+fi
 
 marker_tmp="$(mktemp "$BASE/.production-initialized.XXXXXX")"
 printf '%s\n' \
@@ -284,6 +324,9 @@ grep -q '^FAST_HANDLER_SELF_TEST ok$' <<<"$fast_output" || die "wrapper did not 
 
 timeout 30s systemctl --user start okx-a2a-watchdog.service
 timeout 15s systemctl --user is-active --quiet okx-a2a-watchdog.service || die "watchdog did not start"
+if systemctl --user is-active --quiet okx-a2a.service 2>/dev/null; then
+  die "duplicate okx-a2a.service became active after watchdog start"
+fi
 
 state_file="$BASE/run/watchdog-state.json"
 state_ready=0
@@ -291,9 +334,12 @@ for _ in $(seq 1 45); do
   if [ -s "$state_file" ] && node -e '
     const fs = require("node:fs");
     const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-    const fresh = Number.isInteger(value.checkedAtEpoch) && Math.abs(Date.now() / 1000 - value.checkedAtEpoch) <= 180;
+    const minimumEpoch = Number(process.argv[2]);
+    const fresh = Number.isInteger(value.checkedAtEpoch)
+      && value.checkedAtEpoch >= minimumEpoch
+      && Math.abs(Date.now() / 1000 - value.checkedAtEpoch) <= 180;
     process.exit(fresh && value.agentCount === 1 && value.activeClients === 1 && value.healthy === true ? 0 : 1);
-  ' "$state_file" 2>/dev/null; then
+  ' "$state_file" "$maintenance_started_epoch" 2>/dev/null; then
     state_ready=1
     break
   fi
@@ -307,6 +353,9 @@ refresh_file="$release/agent-refresh.json"
 timeout 45s okx-a2a agent refresh --json >"$refresh_file" 2>"$release/agent-refresh.err"
 jq -e '((.payload.agentCount // .agentCount) == 1) and ((.payload.activeClients // .activeClients) == 1)' \
   "$refresh_file" >/dev/null || die "live communication verification did not return agentCount=1 and activeClients=1"
+if systemctl --user is-active --quiet okx-a2a.service 2>/dev/null; then
+  die "duplicate okx-a2a.service became active during final communication verification"
+fi
 
 success=1
 printf '%s\n' \

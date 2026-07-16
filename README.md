@@ -1,6 +1,6 @@
 # OKX A2A Windows Troubleshooting
 
-For Linux VPS migration and 7x24 operation, see [MIGRATION_LINUX.md](MIGRATION_LINUX.md). The migration notes record 29
+For Linux VPS migration and 7x24 operation, see [MIGRATION_LINUX.md](MIGRATION_LINUX.md). The migration notes record 32
 field-tested lessons covering Node.js 22, Codex device-code login, OnchainOS wallet login, A2A cutover, deterministic
 review handling, approval-state interpretation, hardening, and post-review health checks.
 
@@ -10,6 +10,8 @@ review handling, approval-state interpretation, hardening, and post-review healt
 - The fast handler accepts only an exact, Agent-bound `job_asp_selected` envelope and may execute only an official deterministic `Price gate (TOO_LOW)` rejection. Every semantic or accepting decision falls back to the official Codex role flow.
 - Exit code `64` is the sole safe fallback. Failed deterministic actions are consumed and persisted, preventing a second path or duplicate delivery from acting again.
 - The watchdog is the only lifecycle owner and requires exactly `agentCount=1` and `activeClients=1`. The health check is read-only and consumes the watchdog's atomic state snapshot.
+- The user-level systemd unit uses only hardening directives verified at runtime on an unprivileged VPS manager; unsupported capability and namespace directives are omitted because static unit verification cannot detect every `218/CAPABILITIES` failure.
+- Skills are installed from a tag whose peeled commit is verified first, with both `HOME` and `CODEX_HOME` redirected to private staging so a dry run cannot overwrite live global skills.
 - Run `node --test tests/a2a-fast-handler.security.test.cjs` and `bash tests/test-linux-ops.sh` before a versioned deployment.
 - An approved agent must not be reactivated merely for a health check or routine deployment.
 
@@ -26,6 +28,11 @@ artifacts before stopping the watchdog, backs up the old OnchainOS binary, A2A p
 new runtime, confirms the persisted provider command, checks the fast path, and requires exactly `agentCount=1` and
 `activeClients=1`. Any post-change failure triggers rollback and restarts the single watchdog owner. This workflow does
 not activate, re-submit, or otherwise change Agent listing state.
+
+For a verified legacy production migration that predates the production marker and isolated `okx-ai` skill, add
+`OKX_A2A_ALLOW_LEGACY_BASELINE=1` to both the dry run and the deliberate maintenance run. Do not use this flag on a new
+host or to bypass a damaged marker/skill path; the script accepts only genuinely absent artifacts and records their
+absence so rollback can restore the original state.
 
 Windows 上运行 OKX A2A Agent 时，可能出现“守护进程在线、心跳正常，但 Agent 上架审核仍因无法及时响应而被驳回”的现象。
 

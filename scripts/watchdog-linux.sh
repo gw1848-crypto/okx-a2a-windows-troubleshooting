@@ -166,8 +166,12 @@ ensure_daemon() {
 
 restart_daemon() {
   log "WARN restarting daemon after repeated communication failures"
-  if ! timeout 30s okx-a2a daemon restart 9>&- >>"$LOG" 2>&1; then
-    log "ERROR daemon restart failed or timed out"
+  if ! timeout 30s okx-a2a daemon stop 9>&- >>"$LOG" 2>&1; then
+    log "ERROR daemon stop failed or timed out during restart"
+    return 1
+  fi
+  if ! timeout 30s okx-a2a daemon start --no-autostart 9>&- >>"$LOG" 2>&1; then
+    log "ERROR daemon start failed or timed out during restart"
     return 1
   fi
   if ! daemon_is_running; then
