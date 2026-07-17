@@ -17,7 +17,7 @@ Set the target agent explicitly through `AGENT_ID`; do not commit a production A
 
 ## Field Notes Count
 
-This migration records 29 operational lessons:
+This migration records 33 operational lessons:
 
 1. Browser console access is useful for emergency login, but SSH is more reliable for setup and verification.
 2. Keep the A2A daemon on one machine only; do not leave the Windows and VPS listeners active for the same agent.
@@ -51,6 +51,7 @@ This migration records 29 operational lessons:
 30. Test systemd hardening in the actual unprivileged user manager, not only with `systemd-analyze verify`. On VPS/container hosts, `PrivateDevices`, `ProtectClock`, `ProtectKernelModules`, or an empty `CapabilityBoundingSet` may terminate a user unit with status `218/CAPABILITIES`, while `ProtectHostname` may be ignored because UTS namespaces are unavailable. Keep only directives proven by a transient runtime probe and require a successful service start before committing the unit.
 31. A manually migrated, already-listed runtime may predate both `.production-initialized` and the isolated `okx-ai` skill. Do not invent either artifact before verification or rerun the full bootstrap over production. Use the explicit `OKX_A2A_ALLOW_LEGACY_BASELINE=1` maintenance gate so the upgrade backs up the installed binaries, records that the marker/skill were absent, installs the pinned skill atomically, and removes the new baseline again if post-change validation fails.
 32. The `skills` CLI may interpret `/tree/<commit-sha>` as a branch name and may write `--global` installs to `~/.agents/skills` even when only `CODEX_HOME` is overridden. First verify that the immutable release tag resolves to the pinned commit, install from `/tree/<tag>`, and set both `HOME` and `CODEX_HOME` to a private staging root. Copy the verified result into the isolated production skill directory only after rejecting symlinks.
+33. Keep task discovery separate from acceptance. Periodically call the official `recommend-task` command, filter through explicit deny/capability/price rules, and start at most one `contact-user` negotiation per cooldown. Never cold-start `apply`, loop over job IDs, or treat untrusted descriptions as capability evidence; wait for the buyer/User Agent designation and authoritative system event.
 
 ## Cutover Rule
 
@@ -81,14 +82,15 @@ AGENT_ID=<agent-id> ./scripts/setup-linux-vps.sh
 
 The setup script requires a verified Node.js `>=22.14.0` and an official Codex CLI already on the host. It then installs pinned production dependencies:
 
-- OnchainOS `4.2.4` from the signed release checksums
+- OnchainOS `4.2.6` from the signed release checksums
 - `@okxweb3/a2a-node` `0.1.9`
-- OKX OnchainOS skills from tag `v4.2.4`, pinned to commit `841fe5b86f9299668218362df5f87a1b82b00b21`
-- Vercel `skills` installer `1.5.17` (used only to copy the tagged OKX skill)
+- OKX OnchainOS skills from tag `v4.2.6`, pinned to commit `93a2841501cde295f26af026d9c3a33efd42fd49`
+- Vercel `skills` installer `1.5.19` (used only to copy the tagged OKX skill)
 - an isolated A2A Codex wrapper
 - a deterministic A2A fast handler for platform system events
 - Linux command guards
 - a user-level systemd watchdog
+- an optional guarded public-task discovery timer
 
 ## Required Manual Login
 

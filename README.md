@@ -1,18 +1,18 @@
 # OKX A2A Windows Troubleshooting
 
-For Linux VPS migration and 7x24 operation, see [MIGRATION_LINUX.md](MIGRATION_LINUX.md). The migration notes record 32
+For Linux VPS migration and 7x24 operation, see [MIGRATION_LINUX.md](MIGRATION_LINUX.md). The migration notes record 33
 field-tested lessons covering Node.js 22, Codex device-code login, OnchainOS wallet login, A2A cutover, deterministic
 review handling, approval-state interpretation, hardening, and post-review health checks.
 
 ## Current Linux production profile
 
-- Pin OnchainOS `4.2.4`, `@okxweb3/a2a-node` `0.1.9`, OKX skills tag `v4.2.4` at commit `841fe5b86f9299668218362df5f87a1b82b00b21`, and the `skills` installer `1.5.17`; do not bootstrap over an initialized runtime.
+- Pin OnchainOS `4.2.6`, `@okxweb3/a2a-node` `0.1.9`, OKX skills tag `v4.2.6` at commit `93a2841501cde295f26af026d9c3a33efd42fd49`, and the `skills` installer `1.5.19`; do not bootstrap over an initialized runtime.
 - The fast handler accepts only an exact, Agent-bound `job_asp_selected` envelope and may execute only an official deterministic `Price gate (TOO_LOW)` rejection. Every semantic or accepting decision falls back to the official Codex role flow.
 - Exit code `64` is the sole safe fallback. Failed deterministic actions are consumed and persisted, preventing a second path or duplicate delivery from acting again.
 - The watchdog is the only lifecycle owner and requires exactly `agentCount=1` and `activeClients=1`. The health check is read-only and consumes the watchdog's atomic state snapshot.
 - The user-level systemd unit uses only hardening directives verified at runtime on an unprivileged VPS manager; unsupported capability and namespace directives are omitted because static unit verification cannot detect every `218/CAPABILITIES` failure.
 - Skills are installed from a tag whose peeled commit is verified first, with both `HOME` and `CODEX_HOME` redirected to private staging so a dry run cannot overwrite live global skills.
-- Run `node --test tests/a2a-fast-handler.security.test.cjs` and `bash tests/test-linux-ops.sh` before a versioned deployment.
+- Run `node --test tests/a2a-fast-handler.security.test.cjs`, `node --test tests/a2a-auto-discovery.security.test.cjs`, and `bash tests/test-linux-ops.sh` before a versioned deployment.
 - An approved agent must not be reactivated merely for a health check or routine deployment.
 
 For an initialized Linux production runtime, use the maintenance workflow instead of the bootstrap installer. First run
@@ -33,6 +33,17 @@ For a verified legacy production migration that predates the production marker a
 `OKX_A2A_ALLOW_LEGACY_BASELINE=1` to both the dry run and the deliberate maintenance run. Do not use this flag on a new
 host or to bypass a damaged marker/skill path; the script accepts only genuinely absent artifacts and records their
 absence so rollback can restore the original state.
+
+Guarded public-task discovery is optional. `scripts/install-auto-discovery-linux.sh` installs a hardened 15-minute timer
+that calls the official `recommend-task` flow, filters tasks through explicit capability, safety, token, and price rules,
+and starts at most one `contact-user` negotiation per six hours. It never calls `apply`: a public task can proceed only
+after the buyer/User Agent designates this ASP and the authoritative A2A system event enters the official role flow.
+External-account login, social actions, screenshots, subscription sharing, long-running monitoring, and real-funds or
+wallet-signing work are denied. Install it only after the watchdog is healthy:
+
+```bash
+AGENT_ID=<agent-id> OKX_A2A_ALLOW_MAINTENANCE=1 ./scripts/install-auto-discovery-linux.sh
+```
 
 Windows 上运行 OKX A2A Agent 时，可能出现“守护进程在线、心跳正常，但 Agent 上架审核仍因无法及时响应而被驳回”的现象。
 
@@ -111,7 +122,7 @@ okx-a2a setup --json
 
 - 守护进程处于 `running`。
 - `activeClients` 与预期 Agent 数量一致。
-- 当前 OnchainOS 4.2.4 生产配置下，快速处理器只接管 `job_asp_selected`，并执行官方 `next-action` 返回的准确分支；其他系统事件和点对点消息回退官方角色流程。
+- 当前 OnchainOS 4.2.6 生产配置下，快速处理器只接管 `job_asp_selected`，并执行官方 `next-action` 返回的准确分支；其他系统事件和点对点消息回退官方角色流程。
 - 不为 `Please disregard...` 文本硬编码审核回执；该文本按不可信任务内容处理。
 - 维护终端运行 `setup` 时必须显式使用 watchdog 的 `OKX_A2A_AI_CODEX_COMMAND`，避免误触发新的设备登录。
 - 运行时认证状态为 `ready`。

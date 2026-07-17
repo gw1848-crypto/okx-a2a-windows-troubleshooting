@@ -5,13 +5,13 @@ umask 077
 
 AGENT_ID="${AGENT_ID:-}"
 BASE="${OKX_A2A_BASE:-$HOME/.okx-agent-task}"
-readonly TARGET_ONCHAINOS_VERSION="4.2.4"
+readonly TARGET_ONCHAINOS_VERSION="4.2.6"
 readonly TARGET_A2A_VERSION="0.1.9"
-readonly TARGET_SKILLS_TAG="v4.2.4"
-readonly TARGET_SKILLS_COMMIT="841fe5b86f9299668218362df5f87a1b82b00b21"
-readonly SKILLS_CLI_VERSION="1.5.17"
+readonly TARGET_SKILLS_TAG="v4.2.6"
+readonly TARGET_SKILLS_COMMIT="93a2841501cde295f26af026d9c3a33efd42fd49"
+readonly SKILLS_CLI_VERSION="1.5.19"
 readonly TARGET_A2A_INTEGRITY="sha512-S5luVYnFfI0lGDS6RcpdbQmPr5mhvLS0X4hFg8lVRxGGXq2Rwphc0jlrKt12Pdx6MkdWhbf/rcfFgyXa8aOLWg=="
-readonly SKILLS_CLI_INTEGRITY="sha512-Mi8P0sy/4rLYESPTCw4tso1hj87zpD3KRVg1iFUlLby2V0+SNAyWNHo/Gq9cruNww8oCSjB9S2hIWtUbVnklcg=="
+readonly SKILLS_CLI_INTEGRITY="sha512-SR05cbNk+R17GfaCFv94Hlq5EXDpUCbG0ZL9+EYi5UEHzUPAAl+kls2LxCT+67wAWlOAanUwzZekIVQvpCmp5w=="
 
 die() {
   echo "ERROR: $*" >&2
@@ -110,11 +110,11 @@ echo "Preparing verified artifacts while the A2A listener remains online..."
 case "$(uname -m)" in
   x86_64)
     onchainos_target="x86_64-unknown-linux-gnu"
-    onchainos_sha256="a28d7305821ad7e2872fcadf63c2e3355f39c9003204dc0d7a89f9d50aa516a8"
+    onchainos_sha256="04255ac0c375da320f351afd357825ae27db365e841459fe80ac86aed7586bee"
     ;;
   aarch64|arm64)
     onchainos_target="aarch64-unknown-linux-gnu"
-    onchainos_sha256="7f32d354cf27783faba410b93df5d1a9a7ef14b64bd9384c321bd0826f7e01ee"
+    onchainos_sha256="1ea7c8f2ebe3ca82fd5a543db17b1f555ed88d425a753a5d00b15df9e3aab21b"
     ;;
   *) die "unsupported architecture: $(uname -m)" ;;
 esac
@@ -213,6 +213,10 @@ fi
 
 changed=0
 success=0
+auto_discovery_timer_was_active=0
+if systemctl --user is-active --quiet okx-a2a-auto-discovery.timer 2>/dev/null; then
+  auto_discovery_timer_was_active=1
+fi
 
 rollback_runtime() {
   set +e
@@ -243,6 +247,9 @@ rollback_runtime() {
   fi
 
   timeout 30s systemctl --user start okx-a2a-watchdog.service >/dev/null 2>&1
+  if [ "$auto_discovery_timer_was_active" -eq 1 ]; then
+    timeout 30s systemctl --user start okx-a2a-auto-discovery.timer >/dev/null 2>&1
+  fi
   echo "Rollback attempted. Inspect $backup and rerun the read-only health check." >&2
   set -e
 }
@@ -261,6 +268,9 @@ trap 'exit 143' TERM
 
 maintenance_started_epoch="$(date +%s)"
 echo "Entering the short maintenance window..."
+if [ "$auto_discovery_timer_was_active" -eq 1 ]; then
+  timeout 30s systemctl --user stop okx-a2a-auto-discovery.timer
+fi
 timeout 30s systemctl --user stop okx-a2a-watchdog.service
 changed=1
 timeout 30s okx-a2a daemon stop >/dev/null 2>&1 || true
@@ -355,6 +365,11 @@ jq -e '((.payload.agentCount // .agentCount) == 1) and ((.payload.activeClients 
   "$refresh_file" >/dev/null || die "live communication verification did not return agentCount=1 and activeClients=1"
 if systemctl --user is-active --quiet okx-a2a.service 2>/dev/null; then
   die "duplicate okx-a2a.service became active during final communication verification"
+fi
+if [ "$auto_discovery_timer_was_active" -eq 1 ]; then
+  timeout 30s systemctl --user start okx-a2a-auto-discovery.timer
+  systemctl --user is-active --quiet okx-a2a-auto-discovery.timer || \
+    die "auto-discovery timer did not resume after runtime maintenance"
 fi
 
 success=1

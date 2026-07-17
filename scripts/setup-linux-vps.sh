@@ -5,13 +5,13 @@ umask 077
 AGENT_ID="${AGENT_ID:-}"
 BASE="${OKX_A2A_BASE:-$HOME/.okx-agent-task}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-readonly ONCHAINOS_VERSION="4.2.4"
+readonly ONCHAINOS_VERSION="4.2.6"
 readonly A2A_NODE_VERSION="0.1.9"
-readonly SKILLS_TAG="v4.2.4"
-readonly SKILLS_COMMIT="841fe5b86f9299668218362df5f87a1b82b00b21"
-readonly SKILLS_CLI_VERSION="1.5.17"
+readonly SKILLS_TAG="v4.2.6"
+readonly SKILLS_COMMIT="93a2841501cde295f26af026d9c3a33efd42fd49"
+readonly SKILLS_CLI_VERSION="1.5.19"
 readonly A2A_NODE_INTEGRITY="sha512-S5luVYnFfI0lGDS6RcpdbQmPr5mhvLS0X4hFg8lVRxGGXq2Rwphc0jlrKt12Pdx6MkdWhbf/rcfFgyXa8aOLWg=="
-readonly SKILLS_CLI_INTEGRITY="sha512-Mi8P0sy/4rLYESPTCw4tso1hj87zpD3KRVg1iFUlLby2V0+SNAyWNHo/Gq9cruNww8oCSjB9S2hIWtUbVnklcg=="
+readonly SKILLS_CLI_INTEGRITY="sha512-SR05cbNk+R17GfaCFv94Hlq5EXDpUCbG0ZL9+EYi5UEHzUPAAl+kls2LxCT+67wAWlOAanUwzZekIVQvpCmp5w=="
 
 if [ -z "$AGENT_ID" ]; then
   echo "Set AGENT_ID to the target ASP Agent ID before running this script." >&2
@@ -78,11 +78,11 @@ install_onchainos_release() {
   case "$(uname -m)" in
     x86_64)
       target="x86_64-unknown-linux-gnu"
-      pinned_expected="a28d7305821ad7e2872fcadf63c2e3355f39c9003204dc0d7a89f9d50aa516a8"
+      pinned_expected="04255ac0c375da320f351afd357825ae27db365e841459fe80ac86aed7586bee"
       ;;
     aarch64|arm64)
       target="aarch64-unknown-linux-gnu"
-      pinned_expected="7f32d354cf27783faba410b93df5d1a9a7ef14b64bd9384c321bd0826f7e01ee"
+      pinned_expected="1ea7c8f2ebe3ca82fd5a543db17b1f555ed88d425a753a5d00b15df9e3aab21b"
       ;;
     *) echo "Unsupported architecture: $(uname -m)" >&2; return 1 ;;
   esac
@@ -165,6 +165,7 @@ trap - EXIT
 
 install -m 0755 "$REPO_DIR/tools/codex-a2a-wrapper.sh" "$BASE/bin/codex-a2a-wrapper.sh"
 install -m 0755 "$REPO_DIR/tools/a2a-fast-handler.cjs" "$BASE/bin/a2a-fast-handler.cjs"
+install -m 0755 "$REPO_DIR/tools/a2a-auto-discovery.cjs" "$BASE/bin/a2a-auto-discovery.cjs"
 install -m 0755 "$REPO_DIR/guards/okx-a2a" "$BASE/guard-bin/okx-a2a"
 install -m 0755 "$REPO_DIR/guards/npm" "$BASE/guard-bin/npm"
 install -m 0644 "$REPO_DIR/examples/AGENTS.override-linux.md" "$BASE/codex-home/AGENTS.override.md"
@@ -210,9 +211,67 @@ RestartSec=15
 WantedBy=default.target
 EOF
 
+node_path="$(command -v node)"
+cat > "$HOME/.config/systemd/user/okx-a2a-auto-discovery.service" <<EOF
+[Unit]
+Description=Guarded OKX AI task discovery for Agent $AGENT_ID
+After=network-online.target okx-a2a-watchdog.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+Environment=AGENT_ID=$AGENT_ID
+Environment=OKX_A2A_BASE=$BASE
+Environment=PATH=$HOME/.local/bin:/opt/node-v22/bin:/usr/local/bin:/usr/bin:/bin
+Environment=OKX_A2A_DISCOVERY_MIN_WEBSITE=0.01
+Environment=OKX_A2A_DISCOVERY_MIN_REMOTE=1
+Environment=OKX_A2A_DISCOVERY_MIN_RISK=10
+Environment=OKX_A2A_DISCOVERY_MIN_QUERY=0.01
+Environment=OKX_A2A_DISCOVERY_MIN_ANALYSIS=1
+Environment=OKX_A2A_DISCOVERY_MIN_SOFTWARE=1
+Environment=OKX_A2A_DISCOVERY_MIN_CONTENT=1
+Environment=OKX_A2A_DISCOVERY_MAX_CANDIDATES=3
+Environment=OKX_A2A_DISCOVERY_AUTO_CONTACT=1
+Environment=OKX_A2A_DISCOVERY_CONTACT_COOLDOWN_HOURS=6
+ExecStart=$node_path $BASE/bin/a2a-auto-discovery.cjs
+TimeoutStartSec=90
+Nice=10
+EOF
+
+cat > "$HOME/.config/systemd/user/okx-a2a-auto-discovery.timer" <<'EOF'
+[Unit]
+Description=Run guarded OKX AI task discovery periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+RandomizedDelaySec=60s
+AccuracySec=30s
+Persistent=true
+Unit=okx-a2a-auto-discovery.service
+
+[Install]
+WantedBy=timers.target
+EOF
+chmod 0600 \
+  "$HOME/.config/systemd/user/okx-a2a-watchdog.service" \
+  "$HOME/.config/systemd/user/okx-a2a-auto-discovery.service" \
+  "$HOME/.config/systemd/user/okx-a2a-auto-discovery.timer"
+
 sudo loginctl enable-linger "$USER" >/dev/null 2>&1 || true
 systemctl --user daemon-reload
 systemctl --user enable okx-a2a-watchdog.service
+systemctl --user enable okx-a2a-auto-discovery.timer
 printf '%s\n' "onchainos=$ONCHAINOS_VERSION" "a2a-node=$A2A_NODE_VERSION" \
   "skills=$SKILLS_TAG" "skills-commit=$SKILLS_COMMIT" "skills-cli=$SKILLS_CLI_VERSION" \
   > "$BASE/.production-initialized"
@@ -224,5 +283,6 @@ Next manual steps:
 2. Log in to OnchainOS / OKX Agentic Wallet on this VPS.
 3. Start the single watchdog entrypoint: systemctl --user start okx-a2a-watchdog.service
 4. Wait for $BASE/run/watchdog-state.json to appear (normally within 60 seconds).
-5. Run the read-only check: $BASE/bin/health-check.sh
+5. Start guarded task discovery: systemctl --user start okx-a2a-auto-discovery.timer
+6. Run the read-only check: $BASE/bin/health-check.sh
 EOF

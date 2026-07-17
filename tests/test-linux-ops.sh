@@ -39,14 +39,16 @@ echo "[0/4] shell syntax and maintenance safety gate"
 bash -n \
   "$ROOT/scripts/setup-linux-vps.sh" \
   "$ROOT/scripts/upgrade-linux-runtime.sh" \
+  "$ROOT/scripts/install-auto-discovery-linux.sh" \
   "$ROOT/scripts/watchdog-linux.sh" \
   "$ROOT/scripts/health-check-linux.sh" \
   "$ROOT/tools/codex-a2a-wrapper.sh"
-grep -q 'TARGET_ONCHAINOS_VERSION="4.2.4"' "$ROOT/scripts/upgrade-linux-runtime.sh" || \
-  fail "runtime upgrade does not pin OnchainOS 4.2.4"
+node --check "$ROOT/tools/a2a-auto-discovery.cjs"
+grep -q 'TARGET_ONCHAINOS_VERSION="4.2.6"' "$ROOT/scripts/upgrade-linux-runtime.sh" || \
+  fail "runtime upgrade does not pin OnchainOS 4.2.6"
 grep -q 'TARGET_A2A_VERSION="0.1.9"' "$ROOT/scripts/upgrade-linux-runtime.sh" || \
   fail "runtime upgrade does not pin A2A Node 0.1.9"
-grep -q 'TARGET_SKILLS_COMMIT="841fe5b86f9299668218362df5f87a1b82b00b21"' \
+grep -q 'TARGET_SKILLS_COMMIT="93a2841501cde295f26af026d9c3a33efd42fd49"' \
   "$ROOT/scripts/upgrade-linux-runtime.sh" || fail "runtime upgrade does not pin the OKX skills commit"
 grep -q 'onchainos-skills/tree/${TARGET_SKILLS_TAG}' "$ROOT/scripts/upgrade-linux-runtime.sh" || \
   fail "runtime upgrade does not install from the verified skills tag"
@@ -56,6 +58,10 @@ grep -q 'HOME="$skills_stage/home"' "$ROOT/scripts/setup-linux-vps.sh" || \
   fail "bootstrap does not isolate skills installer writes from the live home"
 grep -q 'onchainos-skills/tree/${SKILLS_TAG}' "$ROOT/scripts/setup-linux-vps.sh" || \
   fail "bootstrap does not install from the verified skills tag"
+grep -q 'OnUnitActiveSec=15min' "$ROOT/scripts/setup-linux-vps.sh" || \
+  fail "bootstrap does not install the 15-minute discovery timer"
+grep -q 'never call apply' "$ROOT/scripts/install-auto-discovery-linux.sh" || \
+  fail "discovery installer does not document the no-direct-apply boundary"
 grep -q 'OKX_A2A_ALLOW_LEGACY_BASELINE' "$ROOT/scripts/upgrade-linux-runtime.sh" || \
   fail "runtime upgrade does not guard legacy baseline migration"
 grep -q 'legacy-skill-existed=' "$ROOT/scripts/upgrade-linux-runtime.sh" || \
@@ -85,6 +91,13 @@ AGENT_ID=424242 OKX_A2A_BASE="$TMP_ROOT/not-initialized" \
 status=$?
 set -e
 assert_status 1 "$status" "explicit maintenance opt-in gate"
+
+set +e
+AGENT_ID=424242 OKX_A2A_BASE="$TMP_ROOT/not-initialized" \
+  "$ROOT/scripts/install-auto-discovery-linux.sh" >/dev/null 2>&1
+status=$?
+set -e
+assert_status 1 "$status" "auto-discovery explicit maintenance opt-in gate"
 
 echo "[1/4] wrapper exit semantics and stdin cleanup"
 WRAPPER_HOME="$TMP_ROOT/wrapper-home"
