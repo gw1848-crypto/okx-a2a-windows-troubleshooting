@@ -81,7 +81,7 @@ Environment=OKX_A2A_DISCOVERY_MIN_SOFTWARE=1
 Environment=OKX_A2A_DISCOVERY_MIN_CONTENT=1
 Environment=OKX_A2A_DISCOVERY_MAX_CANDIDATES=3
 Environment=OKX_A2A_DISCOVERY_AUTO_CONTACT=1
-Environment=OKX_A2A_DISCOVERY_CONTACT_COOLDOWN_HOURS=6
+Environment=OKX_A2A_DISCOVERY_CONTACT_COOLDOWN_HOURS=3
 ExecStart=$node_path $BASE/bin/a2a-auto-discovery.cjs
 TimeoutStartSec=90
 Nice=10
@@ -93,7 +93,7 @@ Description=Run guarded OKX AI task discovery periodically
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=15min
+OnUnitActiveSec=3h
 RandomizedDelaySec=60s
 AccuracySec=30s
 Persistent=true
@@ -128,7 +128,7 @@ node -e '
 
 printf '%s\n' \
   "Auto-discovery installed." \
-  "Timer: active (15 minutes, randomized delay up to 60 seconds)" \
+  "Timer: active (3 hours, randomized delay up to 60 seconds)" \
   "Policy: auto-completable public query >= 0.01; analysis/software/content/remote >= 1; quant risk >= 10 USDT" \
-  "Behavior: start at most one negotiation per 6 hours; never call apply in the discovery loop" \
+  "Behavior: start at most one new negotiation per 3-hour scan; negotiations from separate scans may overlap; never call apply in the discovery loop" \
   "Backup: $backup"

@@ -34,9 +34,11 @@ For a verified legacy production migration that predates the production marker a
 host or to bypass a damaged marker/skill path; the script accepts only genuinely absent artifacts and records their
 absence so rollback can restore the original state.
 
-Guarded public-task discovery is optional. `scripts/install-auto-discovery-linux.sh` installs a hardened 15-minute timer
+Guarded public-task discovery is optional. `scripts/install-auto-discovery-linux.sh` installs a hardened three-hour timer
 that calls the official `recommend-task` flow, filters tasks through explicit capability, safety, token, and price rules,
-and starts at most one `contact-user` negotiation per six hours. It never calls `apply`: a public task can proceed only
+and starts at most one new `contact-user` negotiation per scan. Negotiations created by separate scans may overlap; an
+explicitly supplied job ID can also be contacted separately without waiting for the next scan. It never calls `apply`:
+a public task can proceed only
 after the buyer/User Agent designates this ASP and the authoritative A2A system event enters the official role flow.
 External-account login, social actions, screenshots, subscription sharing, long-running monitoring, and real-funds or
 wallet-signing work are denied. Install it only after the watchdog is healthy:

@@ -31,7 +31,7 @@ function envNumber(name, fallback, min, max) {
 const maxNotifications = Math.trunc(envNumber('OKX_A2A_DISCOVERY_MAX_CANDIDATES', 3, 1, 5));
 const commandTimeoutMs = Math.trunc(envNumber('OKX_A2A_DISCOVERY_TIMEOUT_MS', 60_000, 5_000, 120_000));
 const autoContact = process.env.OKX_A2A_DISCOVERY_AUTO_CONTACT === '1';
-const contactCooldownMs = envNumber('OKX_A2A_DISCOVERY_CONTACT_COOLDOWN_HOURS', 6, 1, 168) * 60 * 60 * 1000;
+const contactCooldownMs = envNumber('OKX_A2A_DISCOVERY_CONTACT_COOLDOWN_HOURS', 3, 1, 168) * 60 * 60 * 1000;
 const denyPattern = /(\[test\]|流程试运行|自动测试消息|请回复确认|登录|oauth|注册|邮箱|电报|telegram|twitter|推特|关注|点赞|转发|评论|截图|蓝v|订阅套餐|api[ -]?key|节点绑定|provider node|每小时|每日推送|持续监控|长期运行|24\s*小时|实时推送|实际资金操作|实际交易|自动交易|下单|转账|钱包授权|签名|桥接到|存入aave|借出基础币|共享订阅)/iu;
 const policy = [
   {
