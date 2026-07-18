@@ -242,7 +242,7 @@ Environment=OKX_A2A_DISCOVERY_MIN_SOFTWARE=1
 Environment=OKX_A2A_DISCOVERY_MIN_CONTENT=1
 Environment=OKX_A2A_DISCOVERY_MAX_CANDIDATES=3
 Environment=OKX_A2A_DISCOVERY_AUTO_CONTACT=1
-Environment=OKX_A2A_DISCOVERY_CONTACT_COOLDOWN_HOURS=3
+Environment=OKX_A2A_DISCOVERY_CONTACT_COOLDOWN_HOURS=1
 ExecStart=$node_path $BASE/bin/a2a-auto-discovery.cjs
 TimeoutStartSec=90
 Nice=10
@@ -254,7 +254,7 @@ Description=Run guarded OKX AI task discovery periodically
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=3h
+OnUnitActiveSec=1h
 RandomizedDelaySec=60s
 AccuracySec=30s
 Persistent=true

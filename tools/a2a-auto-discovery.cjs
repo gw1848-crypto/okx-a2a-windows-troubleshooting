@@ -31,7 +31,7 @@ function envNumber(name, fallback, min, max) {
 const maxNotifications = Math.trunc(envNumber('OKX_A2A_DISCOVERY_MAX_CANDIDATES', 3, 1, 5));
 const commandTimeoutMs = Math.trunc(envNumber('OKX_A2A_DISCOVERY_TIMEOUT_MS', 60_000, 5_000, 120_000));
 const autoContact = process.env.OKX_A2A_DISCOVERY_AUTO_CONTACT === '1';
-const contactCooldownMs = envNumber('OKX_A2A_DISCOVERY_CONTACT_COOLDOWN_HOURS', 3, 1, 168) * 60 * 60 * 1000;
+const contactCooldownMs = envNumber('OKX_A2A_DISCOVERY_CONTACT_COOLDOWN_HOURS', 1, 1, 168) * 60 * 60 * 1000;
 const denyPattern = /(\[test\]|流程试运行|自动测试消息|请回复确认|登录|oauth|注册|邮箱|电报|telegram|twitter|推特|关注|点赞|转发|评论|截图|蓝v|订阅套餐|api[ -]?key|节点绑定|provider node|每小时|每日推送|持续监控|长期运行|24\s*小时|实时推送|实际资金操作|实际交易|自动交易|下单|转账|钱包授权|签名|桥接到|存入aave|借出基础币|共享订阅)/iu;
 const policy = [
   {
@@ -182,6 +182,13 @@ function classify(task) {
   return null;
 }
 
+function valueScore(task, rule) {
+  // The configured category floor is a deterministic proxy for expected work.
+  // Never use the untrusted task description to reduce that baseline.
+  const baseline = Math.max(rule.minimum, 0.01);
+  return Math.round((task.budget / baseline) * 100) / 100;
+}
+
 function readState() {
   try {
     const value = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
@@ -238,6 +245,7 @@ function notify(candidates) {
   const rows = candidates.map((candidate, index) => (
     `${index + 1}. ${candidate.title}\n` +
     `   报酬：${candidate.budgetText} USDT\n` +
+    `   性价比：${candidate.valueScore.toFixed(2)}× 类别最低价\n` +
     `   匹配服务：${candidate.rule.label}\n` +
     `   任务 ID：${candidate.jobId}`
   ));
@@ -246,7 +254,7 @@ function notify(candidates) {
 }
 
 function notifyContact(candidate) {
-  const content = `[自动找单] 已为归元选择并联系一个可自动完成的任务：\n\n${candidate.title}\n报酬：${candidate.budgetText} USDT\n匹配能力：${candidate.rule.label}\n任务 ID：${candidate.jobId}\n\n已进入官方协商流程；买方指定归元后，系统事件才会提交申请。`;
+  const content = `[自动找单] 已为归元选择并联系一个可自动完成的任务：\n\n${candidate.title}\n报酬：${candidate.budgetText} USDT\n性价比：${candidate.valueScore.toFixed(2)}× 类别最低价\n匹配能力：${candidate.rule.label}\n任务 ID：${candidate.jobId}\n\n已进入官方协商流程；买方指定归元后，系统事件才会提交申请。`;
   return run(['agent', 'user-notify', '--content', content], 10_000);
 }
 
@@ -287,10 +295,10 @@ function main() {
     for (const task of tasks) {
       const rule = classify(task);
       if (!rule || state.seen[task.jobId]) continue;
-      eligible.push({ ...task, rule });
+      eligible.push({ ...task, rule, valueScore: valueScore(task, rule) });
     }
 
-    eligible.sort((a, b) => b.budget - a.budget || b.createdAt.localeCompare(a.createdAt));
+    eligible.sort((a, b) => b.valueScore - a.valueScore || b.budget - a.budget || b.createdAt.localeCompare(a.createdAt));
     eligible.splice(maxNotifications);
 
     if (eligible.length === 0) {
@@ -300,7 +308,7 @@ function main() {
     }
 
     if (process.env.OKX_A2A_DISCOVERY_DRY_RUN === '1') {
-      console.log(JSON.stringify({ matched: tasks.length, eligible: eligible.map(({ jobId, title, budgetText, rule }) => ({ jobId, title, budget: budgetText, service: rule.id })) }));
+      console.log(JSON.stringify({ matched: tasks.length, eligible: eligible.map(({ jobId, title, budgetText, rule, valueScore: score }) => ({ jobId, title, budget: budgetText, service: rule.id, valueScore: score })) }));
       return EXIT_OK;
     }
 
@@ -320,6 +328,7 @@ function main() {
         notifiedAt: contactedAt,
         service: candidate.rule.id,
         budget: candidate.budgetText,
+        valueScore: candidate.valueScore,
         contactStatus: contacted.status === 0 ? 'started' : 'failed',
       };
       writeState(state);
@@ -342,7 +351,7 @@ function main() {
 
     const notifiedAt = new Date().toISOString();
     for (const candidate of eligible) {
-      state.seen[candidate.jobId] = { notifiedAt, service: candidate.rule.id, budget: candidate.budgetText };
+      state.seen[candidate.jobId] = { notifiedAt, service: candidate.rule.id, budget: candidate.budgetText, valueScore: candidate.valueScore };
     }
     writeState(state);
     log(`scan matched=${tasks.length} eligible=${eligible.length} notified=${eligible.length}`);

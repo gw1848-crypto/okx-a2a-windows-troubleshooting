@@ -234,6 +234,20 @@ test('selection ranks every eligible recommendation before applying the output l
   assert.equal(contactCalls[0].args[2], `0x${'4'.repeat(64)}`);
 });
 
+test('value ranking prefers stronger return relative to the category price floor', () => {
+  const f = fixture([
+    job('5', '量化策略最大回撤风险评估', 10),
+    job('6', '美股行情走势分析', 2),
+  ]);
+  const result = run(f, { OKX_A2A_DISCOVERY_AUTO_CONTACT: '1' });
+  assert.equal(result.status, 0, result.stderr);
+  const contactCalls = calls(f).filter((call) => call.args[1] === 'contact-user');
+  assert.equal(contactCalls.length, 1);
+  assert.equal(contactCalls[0].args[2], `0x${'6'.repeat(64)}`);
+  const notice = calls(f).find((call) => call.args[1] === 'user-notify');
+  assert.match(notice.args.at(-1), /性价比：2\.00× 类别最低价/u);
+});
+
 test('external-account and long-running work is excluded even at a high budget', () => {
   const f = fixture([
     job('7', '分析并提交验证结果', 100),

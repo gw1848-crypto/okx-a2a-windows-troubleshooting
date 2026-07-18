@@ -58,8 +58,8 @@ grep -q 'HOME="$skills_stage/home"' "$ROOT/scripts/setup-linux-vps.sh" || \
   fail "bootstrap does not isolate skills installer writes from the live home"
 grep -q 'onchainos-skills/tree/${SKILLS_TAG}' "$ROOT/scripts/setup-linux-vps.sh" || \
   fail "bootstrap does not install from the verified skills tag"
-grep -q 'OnUnitActiveSec=3h' "$ROOT/scripts/setup-linux-vps.sh" || \
-  fail "bootstrap does not install the 3-hour discovery timer"
+grep -q 'OnUnitActiveSec=1h' "$ROOT/scripts/setup-linux-vps.sh" || \
+  fail "bootstrap does not install the hourly discovery timer"
 grep -q 'never call apply' "$ROOT/scripts/install-auto-discovery-linux.sh" || \
   fail "discovery installer does not document the no-direct-apply boundary"
 grep -q 'OKX_A2A_ALLOW_LEGACY_BASELINE' "$ROOT/scripts/upgrade-linux-runtime.sh" || \
