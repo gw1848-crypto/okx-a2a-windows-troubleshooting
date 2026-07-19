@@ -66,6 +66,15 @@ if ((Test-Path -LiteralPath (Join-Path $guardBin "okx-a2a.cmd")) -and
     Write-Warning "Inbound maintenance command guards are missing."
 }
 
+Write-Host "`n== Watchdog =="
+$watchdog = Join-Path $env:USERPROFILE ".okx-agent-task\watchdog\watchdog.ps1"
+$runCommand = Get-ItemPropertyValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "OKXA2AWatchdog" -ErrorAction SilentlyContinue
+if ((Test-Path -LiteralPath $watchdog) -and $runCommand -like "*$watchdog*") {
+    Write-Host "OK: user-level startup watchdog is registered."
+} else {
+    Write-Warning "Startup watchdog is missing or not registered."
+}
+
 Write-Host "`n== Daemon =="
 okx-a2a daemon status
 

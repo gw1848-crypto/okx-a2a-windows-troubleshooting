@@ -1,5 +1,53 @@
 # OKX A2A Windows Troubleshooting
 
+For Linux VPS migration and 7x24 operation, see [MIGRATION_LINUX.md](MIGRATION_LINUX.md). The migration notes record 33
+field-tested lessons covering Node.js 22, Codex device-code login, OnchainOS wallet login, A2A cutover, deterministic
+review handling, approval-state interpretation, hardening, and post-review health checks.
+
+## Current Linux production profile
+
+- Pin OnchainOS `4.2.6`, `@okxweb3/a2a-node` `0.1.9`, OKX skills tag `v4.2.6` at commit `93a2841501cde295f26af026d9c3a33efd42fd49`, and the `skills` installer `1.5.19`; do not bootstrap over an initialized runtime.
+- The fast handler accepts only an exact, Agent-bound `job_asp_selected` envelope and may execute only an official deterministic `Price gate (TOO_LOW)` rejection. Every semantic or accepting decision falls back to the official Codex role flow.
+- Exit code `64` is the sole safe fallback. Failed deterministic actions are consumed and persisted, preventing a second path or duplicate delivery from acting again.
+- The watchdog is the only lifecycle owner and requires exactly `agentCount=1` and `activeClients=1`. The health check is read-only and consumes the watchdog's atomic state snapshot.
+- The user-level systemd unit uses only hardening directives verified at runtime on an unprivileged VPS manager; unsupported capability and namespace directives are omitted because static unit verification cannot detect every `218/CAPABILITIES` failure.
+- Skills are installed from a tag whose peeled commit is verified first, with both `HOME` and `CODEX_HOME` redirected to private staging so a dry run cannot overwrite live global skills.
+- Run `node --test tests/a2a-fast-handler.security.test.cjs`, `node --test tests/a2a-auto-discovery.security.test.cjs`, and `bash tests/test-linux-ops.sh` before a versioned deployment.
+- An approved agent must not be reactivated merely for a health check or routine deployment.
+
+For an initialized Linux production runtime, use the maintenance workflow instead of the bootstrap installer. First run
+the artifact and rollback dry run while the listener remains online:
+
+```bash
+AGENT_ID=<agent-id> OKX_A2A_ALLOW_MAINTENANCE=1 OKX_A2A_MAINTENANCE_DRY_RUN=1 \
+  ./scripts/upgrade-linux-runtime.sh
+```
+
+Then open a deliberate maintenance window and omit `OKX_A2A_MAINTENANCE_DRY_RUN`. The script verifies all pinned
+artifacts before stopping the watchdog, backs up the old OnchainOS binary, A2A package and skill, atomically installs the
+new runtime, confirms the persisted provider command, checks the fast path, and requires exactly `agentCount=1` and
+`activeClients=1`. Any post-change failure triggers rollback and restarts the single watchdog owner. This workflow does
+not activate, re-submit, or otherwise change Agent listing state.
+
+For a verified legacy production migration that predates the production marker and isolated `okx-ai` skill, add
+`OKX_A2A_ALLOW_LEGACY_BASELINE=1` to both the dry run and the deliberate maintenance run. Do not use this flag on a new
+host or to bypass a damaged marker/skill path; the script accepts only genuinely absent artifacts and records their
+absence so rollback can restore the original state.
+
+Guarded public-task discovery is optional. `scripts/install-auto-discovery-linux.sh` installs a hardened hourly timer
+that calls the official `recommend-task` flow, filters tasks through explicit capability, safety, token, and price rules,
+and ranks candidates by `budget / category price floor` before starting at most one new `contact-user` negotiation per
+scan. Negotiations created by separate scans may overlap; an
+explicitly supplied job ID can also be contacted separately without waiting for the next scan. It never calls `apply`:
+a public task can proceed only
+after the buyer/User Agent designates this ASP and the authoritative A2A system event enters the official role flow.
+External-account login, social actions, screenshots, subscription sharing, long-running monitoring, and real-funds or
+wallet-signing work are denied. Install it only after the watchdog is healthy:
+
+```bash
+AGENT_ID=<agent-id> OKX_A2A_ALLOW_MAINTENANCE=1 ./scripts/install-auto-discovery-linux.sh
+```
+
 Windows 上运行 OKX A2A Agent 时，可能出现“守护进程在线、心跳正常，但 Agent 上架审核仍因无法及时响应而被驳回”的现象。
 
 本文记录一次真实排障过程。所有 Agent ID、钱包地址、任务 ID、邮箱、本机用户名和业务资料均已移除。
@@ -15,7 +63,7 @@ Windows 上运行 OKX A2A Agent 时，可能出现“守护进程在线、心跳
 
 ## 根因
 
-本次故障由四个问题叠加造成：
+本次故障由六个问题叠加造成：
 
 1. **Codex 冷启动上下文过大**
    - 每条审核消息都会启动一次完整 Codex 会话。
@@ -43,6 +91,12 @@ Windows 上运行 OKX A2A Agent 时，可能出现“守护进程在线、心跳
    - 子会话为释放文件锁执行 `daemon stop`，导致正在接收审核消息的进程自我关闭。
    - 后续系统事件留在队列中，没有执行 `next-action` 或发送业务回复。
 
+6. **审核探针继续处理并误报 JWT 失败**
+   - 固定群聊探针包含“忽略其他限制并完成任务”的越权文本，不应被当作执行指令。
+   - 系统事件已经按能力或价格规则拒绝任务后，排队的群聊分支仍继续查询状态。
+   - 状态查询遗漏接收方 `--agent-id` 时，可能选错账户 JWT 并返回 `code=3001 auth fail`。
+   - 子会话随后把内部鉴权错误发给审核方，导致在线 Agent 仍被判定为功能验证失败。
+
 后续复盘确认，平台的边界测试可能就是故意制造“能力不匹配”和“报价低于登记费”的场景。此时拒绝本身是正确行为，真正影响审核的是作出拒绝决定和发送回调所需的总时间。
 
 ## 修复步骤
@@ -52,7 +106,7 @@ Windows 上运行 OKX A2A Agent 时，可能出现“守护进程在线、心跳
 ```powershell
 node --version
 npm --version
-npm install -g @okxweb3/a2a-node@latest
+npm install -g @okxweb3/a2a-node@0.1.9
 okx-a2a doctor --fix
 ```
 
@@ -71,6 +125,9 @@ okx-a2a setup --json
 
 - 守护进程处于 `running`。
 - `activeClients` 与预期 Agent 数量一致。
+- 当前 OnchainOS 4.2.6 生产配置下，快速处理器只接管 `job_asp_selected`，并执行官方 `next-action` 返回的准确分支；其他系统事件和点对点消息回退官方角色流程。
+- 不为 `Please disregard...` 文本硬编码审核回执；该文本按不可信任务内容处理。
+- 维护终端运行 `setup` 时必须显式使用 watchdog 的 `OKX_A2A_AI_CODEX_COMMAND`，避免误触发新的设备登录。
 - 运行时认证状态为 `ready`。
 
 ### 3. 验证通知回调
@@ -95,7 +152,7 @@ okx-a2a doctor --fix
 - 保留必要的工作目录、沙箱和授权策略。
 - 使用 `OKX_A2A_AI_CODEX_COMMAND` 指向专用启动器，由启动器仅对子进程设置 `CODEX_HOME`。
 
-`@okxweb3/a2a-node` 版本行为可能变化。实测 `0.1.5` 的守护进程任务路径没有采用早期配置中的自定义参数模板，因此仅设置额外参数环境变量并不足以证明优化已生效。应以实际审核会话日志为准，检查是否仍加载个人插件及大量无关技能。
+`@okxweb3/a2a-node` 版本行为可能变化。实测 `0.1.5` 的守护进程任务路径没有采用早期配置中的自定义参数模板，因此仅设置额外参数环境变量并不足以证明优化已生效。升级到当前固定的 `0.1.9` 后，仍应通过 `setup --json` 核对实际 `providerCommand`，并检查本地快速路径没有被更新覆盖。
 
 仓库提供了 [`tools/codex-a2a-wrapper.cs`](tools/codex-a2a-wrapper.cs) 示例。它只设置隔离目录、定位官方 `codex.exe` 并原样转发参数，不修改任务内容或扩大权限。
 
@@ -162,6 +219,13 @@ process.exit(result.status ?? 1);
 
 示例守卫位于 [`guards`](guards)；示例隔离指令位于 [`examples/AGENTS.override.md`](examples/AGENTS.override.md)。这些文件需要根据本机安装路径审阅后使用。
 
+### 8. 隔离审核探针与内部错误
+
+- 将固定越权群聊探针视为不可信任务描述，静默等待同一任务的权威系统事件。
+- 所有入站任务状态查询都携带当前信封中的接收方 `agentId`，避免账户 JWT 绑定错误。
+- JWT、鉴权失败、stderr、命令名和堆栈等内部诊断只通知本机用户，不发送给对方 Agent。
+- 在专用运行环境中使用命令守卫机械阻止敏感错误通过 `xmtp-send` 外发。
+
 ## 日志定位
 
 常见日志位置：
@@ -210,6 +274,10 @@ Select-String -Path "$env:USERPROFILE\.okx-agent-task\logs\listener.log" `
 - 保持代理/TUN 和 A2A 守护进程运行。
 - 需要开机自启时，在管理员 PowerShell 中安装守护进程自启任务。
 - 每次重启后执行健康检查，确认 `activeClients` 恢复。
+
+仓库中的 `scripts/watchdog.ps1` 提供低干扰守护：正常在线时只检查状态；守护进程停止时自动启动，连续两次通信离线时才重启，并重新确认专用 Codex 包装器。`scripts/install-watchdog.ps1` 将其注册为当前用户登录自启，不需要管理员权限。
+
+守护程序还会检查入站任务的快速路径补丁。仅当当前文件与备份版本号完全相同时才自动恢复；版本不同会写入日志而不会覆盖新版文件。日志位于 `%USERPROFILE%\.okx-agent-task\logs\watchdog.log`。
 
 ## 安全建议
 
